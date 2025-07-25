@@ -2,11 +2,10 @@ import json
 import os
 import uuid
 import chromadb
-# Import both OpenAI for embeddings and Anthropic for chat completions
 from openai import OpenAI
 from anthropic import Anthropic
 from dotenv import load_dotenv
-import random 
+import random
 
 # Load environment variables (API keys)
 load_dotenv()
@@ -21,7 +20,7 @@ client_anthropic = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # Base directory for our single, mock database
 DATABASE_DIR = "./mock_resume_database"
-os.makedirs(DATABASE_DIR, exist_ok=True) # Create this folder if it doesn't already exist
+os.makedirs(DATABASE_DIR, exist_ok=True) 
 
 # Initialize ChromaDB client pointing to our single database directory
 chroma_client = chromadb.PersistentClient(path=os.path.join(DATABASE_DIR, "chroma_db"))
@@ -31,8 +30,6 @@ COLLECTION_NAME = "all_resumes"
 def get_embedding(text, model="text-embedding-3-small"):
     """
     Generates a numerical 'embedding' (a list of numbers) for a given piece of text.
-    Embeddings are crucial because they allow us to measure the 'semantic similarity'
-    between pieces of text (like a job query and a resume).
     We use OpenAI's 'text-embedding-3-small' model for this.
     """
     text = text.replace("\n", " ") 
@@ -118,110 +115,179 @@ def initialize_database(num_resumes=100):
     else:
         print(f"No valid resumes to add to the database.")
 
-# --- Query Function ---
-def query_database(query: str, num_results: int = 5):
+# --- Tool Function: resume_search_tool ---
+# This function performs the actual search and returns raw candidate data.
+# Claude will call this function.
+def resume_search_tool(query: str, num_results: int = 5) -> list[dict]:
     """
-    This is the main search function. It takes a hiring manager's query,
-    finds the most relevant resumes using embeddings (OpenAI), and then uses
-    Claude to provide a detailed analysis and ranking.
+    Searches the resume database for candidates matching the given query.
+    Returns a list of candidate dictionaries with their raw resume text.
+    This function is designed to be called by an AI model as a tool.
     """
+    print(f"\n--- Tool Call: resume_search_tool(query='{query}', num_results={num_results}) ---")
     if not query:
-        return "Error: Query cannot be empty. Please enter what you are looking for."
+        print("Tool Error: Query cannot be empty.")
+        return [{"error": "Query cannot be empty for resume search."}]
 
     try:
         collection = chroma_client.get_collection(name=COLLECTION_NAME)
         if collection.count() == 0:
-            return "The resume database is empty. Please click 'Initialize Database' in the sidebar first."
+            print("Tool Error: The resume database is empty.")
+            return [{"error": "Resume database is empty. Initialize it first."}]
     except Exception as e:
-        return f"Error: Could not access the resume database. Please ensure it's initialized. (Details: {e})"
+        print(f"Tool Error: Could not access the resume database. Details: {e}")
+        return [{"error": f"Database access error: {e}"}]
 
     query_embedding = get_embedding(query)
     if query_embedding is None:
-        return "Error: Could not generate embedding for your query. Please check your internet connection or OpenAI API key."
+        print("Tool Error: Could not generate embedding for query.")
+        return [{"error": "Failed to generate embedding for query."}]
 
-    # Perform the semantic search in ChromaDB.
-    # THIS IS THE CORRECTED LINE: Removed 'ids' from the include list.
     results = collection.query(
-        query_embeddings=[query_embedding], 
-        n_results=num_results,             
-        include=['metadatas'] # <-- FIXED THIS LINE
+        query_embeddings=[query_embedding],
+        n_results=num_results,
+        include=['metadatas'] # Only need metadatas; IDs are always returned
     )
 
-    candidates_for_llm = [] 
+    candidates_data = []
     raw_resumes_dir = os.path.join(DATABASE_DIR, "raw_resumes")
 
-    if results and results['ids'] and results['ids'][0]: 
-        print(f"Found {len(results['ids'][0])} potential candidates via semantic search. Preparing for Claude analysis...")
+    if results and results['ids'] and results['ids'][0]:
+        print(f"Tool: Found {len(results['ids'][0])} potential candidates via semantic search.")
         for i, resume_id in enumerate(results['ids'][0]):
-            metadata = results['metadatas'][0][i] 
+            metadata = results['metadatas'][0][i]
             
             resume_file_path = os.path.join(raw_resumes_dir, f"{resume_id}.json")
             try:
                 with open(resume_file_path, "r") as f:
                     full_resume_data = json.load(f)
-                    raw_text = full_resume_data.get("raw_text", "No raw text available for detailed review.")
+                    raw_text = full_resume_data.get("raw_text", "No raw text available.")
             except FileNotFoundError:
                 raw_text = "Raw resume file not found on disk."
-                print(f"Warning: Raw resume file not found for {resume_id}. Check if '{resume_file_path}' exists.")
+                print(f"Warning: Raw resume file not found for {resume_id}")
             except json.JSONDecodeError:
-                raw_text = "Could not parse raw resume JSON file. File might be corrupted."
+                raw_text = "Could not parse raw resume JSON file."
                 print(f"Warning: Could not parse raw resume JSON for {resume_id}.")
             
-            candidates_for_llm.append({
+            candidates_data.append({
                 "id": resume_id,
                 "name": metadata.get("name", "N/A"),
                 "job_title": metadata.get("job_title", "N/A"),
                 "level": metadata.get("level", "N/A"),
                 "industry": metadata.get("industry", "N/A"),
                 "skills": metadata.get("skills", "N/A"),
-                "raw_resume_text": raw_text 
+                "raw_resume_text": raw_text # This is the crucial part sent to the LLM
             })
     else:
-        return "No candidates found matching the initial semantic search criteria. Try a different query or initialize the database."
+        print("Tool: No candidates found for the query.")
+        return [{"message": "No candidates found matching the search criteria."}]
+    
+    return candidates_data
 
-    return get_llm_summary_and_ranking(query, candidates_for_llm)
+# --- Tool Schema Definition ---
+# This JSON structure tells Claude about our 'resume_search_tool'
+resume_search_tool_schema = {
+    "name": "resume_search_tool",
+    "description": "Searches a proprietary database of candidate resumes to find profiles matching a specific job query. This tool is useful for finding relevant candidates based on skills, experience, and role requirements.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The natural language job description or requirements for the candidate being sought."
+            },
+            "num_results": {
+                "type": "integer",
+                "description": "The maximum number of top relevant resume profiles to retrieve from the database. Defaults to 5. Max 15.",
+                "default": 5
+            }
+        },
+        "required": ["query"]
+    }
+}
 
-# --- LLM Analysis Function (Uses Claude) ---
-def get_llm_summary_and_ranking(query, candidates):
+# --- Claude Tool Use Orchestration Function ---
+def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: int = 7):
     """
-    Uses Claude (Anthropic's model) to analyze candidates against the query
-    and provide a summarized, ranked list with reasoning.
+    Orchestrates the interaction with Claude using its tool-use capabilities.
+    Claude will decide when to call the resume_search_tool.
     """
-    if not candidates:
-        return "No candidates provided for LLM analysis."
+    print(f"\n--- Orchestrating Claude Search for: '{user_query}' ---")
 
-    system_message = "You are an expert HR recruitment assistant. Your task is to evaluate candidate profiles against a hiring manager's query and provide insightful analysis and recommendations. Focus on core skills, experience, and leadership where relevant. Be concise but thorough, and always suggest top candidates with reasons."
-
-    prompt_content = [
-        f"The hiring manager is looking for candidates with the following requirements: '{query}'\n",
-        "Here are some candidate profiles from our proprietary database. Please evaluate how well each candidate matches the query, explain your reasoning clearly, and provide a confidence score (0-100) for each based on the provided resume text. Finally, recommend the top 3 best-fit candidates and briefly explain why they stand out.\n",
-        "--- Candidates for Evaluation ---\n"
+    messages = [
+        {
+            "role": "user",
+            "content": user_query
+        }
     ]
 
-    for i, candidate in enumerate(candidates):
-        limited_raw_text = candidate['raw_resume_text'][:1500]
-        if len(candidate['raw_resume_text']) > 1500:
-            limited_raw_text += "...\n(Full resume text truncated for brevity)"
-        
-        prompt_content.append(f"Candidate {i+1}: Name: {candidate['name']}, Job Title: {candidate['job_title']}, Level: {candidate['level']}, Industry: {candidate['industry']}, Skills: {candidate['skills']}\n")
-        prompt_content.append(f"Detailed Resume Snippet for Candidate {i+1}:\n{limited_raw_text}\n")
-        prompt_content.append("---\n") 
-    
-    prompt_content.append("\nYour Evaluation and Top Recommendations (format clearly, use bullet points for justifications):")
-
+    # First call to Claude: Provide the user's query and the available tool
     try:
         response = client_anthropic.messages.create(
-            model="claude-3-haiku-20240307", 
-            max_tokens=1500, 
-            temperature=0.5, 
-            system=system_message, 
-            messages=[
-                {"role": "user", "content": "".join(prompt_content)} 
-            ]
+            model="claude-3-haiku-20240307", # Using the Haiku model that worked
+            max_tokens=2000, # Allow more tokens for Claude's reasoning
+            temperature=0.0, # Set temperature low for more deterministic tool use
+            tools=[resume_search_tool_schema], # Provide the tool schema
+            messages=messages,
+            system="You are an expert HR recruitment assistant. You have access to a `resume_search_tool` to find candidates. Use this tool when the user asks to find candidates or describes job requirements. After using the tool, analyze the results and provide a clear, concise summary of the top candidates, their fit, and confidence scores. Always recommend the top 3 best-fit candidates with reasons."
         )
-        return response.content[0].text 
     except Exception as e:
-        return f"Error communicating with Claude: {e}. Please check your Anthropic API key and internet connection."
+        return f"Error initiating conversation with Claude: {e}. Check your Anthropic API key."
+
+    # Process Claude's first response
+    if response.stop_reason == "tool_use":
+        tool_use = response.content[0]
+        tool_name = tool_use.name
+        tool_input = tool_use.input
+
+        print(f"Claude requested to use tool: {tool_name} with input: {tool_input}")
+
+        # Validate and execute the tool
+        if tool_name == "resume_search_tool":
+            # Ensure num_results from Claude doesn't exceed our max
+            # THIS LINE HAS BEEN CORRECTED FOR THE SYNTAX ERROR
+            requested_num_results = min(tool_input.get("num_results", 5), num_profiles_to_retrieve)
+            
+            # Execute the actual Python function that represents the tool
+            tool_output = resume_search_tool(
+                query=tool_input.get("query"),
+                num_results=requested_num_results
+            )
+            print(f"Tool execution complete. Results: {len(tool_output)} candidates found.")
+            
+            # Send the tool's output back to Claude
+            messages.append({"role": "assistant", "content": [tool_use]})
+            messages.append({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use.id,
+                        "content": json.dumps(tool_output) 
+                    }
+                ]
+            })
+
+            # Second call to Claude: Now with the tool results
+            try:
+                final_response = client_anthropic.messages.create(
+                    model="claude-3-haiku-20240307", # Use the same model
+                    max_tokens=1500,
+                    temperature=0.5, # Can increase temperature slightly for more creative response
+                    messages=messages,
+                    system="You are an expert HR recruitment assistant. You have access to a `resume_search_tool` to find candidates. Use this tool when the user asks to find candidates or describes job requirements. After using the tool, analyze the results and provide a clear, concise summary of the top candidates, their fit, and confidence scores. Always recommend the top 3 best-fit candidates with reasons."
+                )
+                return final_response.content[0].text
+            except Exception as e:
+                return f"Error getting final response from Claude after tool use: {e}"
+        else:
+            return f"Claude requested an unknown tool: {tool_name}"
+    elif response.stop_reason == "end_turn":
+        # Claude decided it didn't need a tool (e.g., simple greeting)
+        return response.content[0].text
+    else:
+        return f"Unexpected Claude response stop reason: {response.stop_reason}. Content: {response.content[0].text if response.content else 'No content'}"
+
 
 # --- Helper: Generate Fake Resume Data (for database initialization) ---
 def generate_fake_resume_data(num_resumes=10):
@@ -252,9 +318,14 @@ def generate_fake_resume_data(num_resumes=10):
             f"Strong problem-solving abilities and a collaborative mindset."
         )
         
+        # --- FIX APPLIED HERE: Simplified email generation to avoid f-string complexity ---
+        email_local_part = name.lower().replace(' ', '.')
+        # Removed problematic .replace('from.globalsolutions.inc.', '') directly in f-string
+        email_local_part = email_local_part.replace('..', '.') # Clean up potential double dots if name has multiple spaces
+
         full_raw_text = (
             f"Name: {name}\n"
-            f"Email: {name.lower().replace(' ', '.').replace('from.globalsolutions.inc.', '').replace('..', '.')}@example.com | Phone: (123) 555-{i:04d}\n\n"
+            f"Email: {email_local_part}@example.com | Phone: (123) 555-{i:04d}\n\n" # SIMPLIFIED LINE
             f"**Summary:** A results-oriented and experienced {level} {job_title} with {experience_years} years in the {industry} industry. "
             f"Skilled in {', '.join(candidate_skills)}. Adept at {experience_summary.split('Proven track record in ')[-1].lower()}.\n\n"
             f"**Experience:**\n"
