@@ -1,0 +1,19 @@
+# Python specific ignores
+__pycache__/
+*.pyc
+.Python
+build/
+dist/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+
+# Virtual environment
+venv/
+.venv/ # Just in case it's named .venv
+
+# Environment variables file (CRITICAL for your API keys!)
+.env
+
+# Local database files
+mock_resume_database/ # Ignore the entire mock_resume_database folder
