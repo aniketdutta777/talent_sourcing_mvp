@@ -4,7 +4,8 @@ from pydantic import BaseModel, Field
 import uvicorn
 import json 
 import os 
-# from dotenv import load_dotenv # <--- ENSURE THIS LINE IS COMMENTED OR DELETED (not needed when deployed)
+# from dotenv import load_dotenv # <--- ENSURE THIS LINE IS COMMENTED OR DELETED 
+                               # It's not needed when deployed to Railway as variables are injected.
 
 # Import the core logic functions and GLOBAL variables from core_logic.py
 # IMPORTANT: initialize_api_clients MUST be called in @app.on_event("startup")
