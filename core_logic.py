@@ -154,10 +154,10 @@ def initialize_database(num_resumes=100):
         metadatas_to_add.append({
             "resume_id": resume_id,
             "name": resume.get("name", "N/A"),
-            "job_title": metadata.get("job_title", "N/A"), # Fixed typo
-            "level": metadata.get("level", "N/A"), # Fixed typo
-            "industry": metadata.get("industry", "N/A"), # Fixed typo
-            "skills": ", ".join(metadata.get("skills", [])), # Fixed typo
+            "job_title": resume.get("job_title", "N/A"),
+            "level": resume.get("level", "N/A"),            
+            "industry": resume.get("industry", "N/A"),   
+            "skills": ", ".join(resume.get("skills", [])),
         })
         ids_to_add.append(resume_id)
         embeddings_to_add.append(embedding)
