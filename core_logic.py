@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 import random 
 
 # --- Load environment variables (API keys) and DEBUG prints ---
-load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 # This key is for your own API authentication. REMOVED DEFAULT VALUE for stricter checking.

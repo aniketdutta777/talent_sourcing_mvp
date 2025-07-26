@@ -7,7 +7,7 @@ import os
 from dotenv import load_dotenv # Added load_dotenv
 
 # Load environment variables (API_SECRET_KEY)
-load_dotenv()
+
 # This key is used by the API server to VERIFY incoming requests
 YOUR_MOCK_API_KEY_SERVER = os.getenv("YOUR_MOCK_API_KEY") 
 
