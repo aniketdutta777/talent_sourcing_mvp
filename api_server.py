@@ -9,6 +9,13 @@ import os
 # Import core_logic as a module to correctly access its global variables and functions
 import core_logic # <--- CRUCIAL CHANGE: Import core_logic as a module
 
+# A simple in-memory "database" of valid API keys.
+# In a real production system, this would eventually be a database table.
+VALID_API_KEYS = {
+    "a885598e-1a1b-463b-9c23-acc4e4275330",  # e.g., "a885598e-1a1b-463b-..."
+    "05f84d16-3908-4da3-8804-5c455d4acc1c"
+}
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Talent Search MCP API (Mock)",
@@ -21,18 +28,14 @@ security_scheme = HTTPBearer()
 
 # Dependency function to check the API key
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security_scheme)):
-    # print(f"DEBUG AUTH: Received credential: '{credentials.credentials}'") 
-    # print(f"DEBUG AUTH: Expected key: '{core_logic.global_mock_api_key}'") # Use core_logic.global_mock_api_key here
-
-    # Check if the global_mock_api_key was loaded successfully by initialize_api_clients
-    if core_logic.global_mock_api_key is None: # <--- Use core_logic.global_mock_api_key
-        raise HTTPException(status_code=500, detail="Server Error: API Key not initialized. Please ensure the API server started correctly and clients initialized.")
-
-    if credentials.credentials == core_logic.global_mock_api_key: # <--- Use core_logic.global_mock_api_key
-        return True 
+    """
+    Checks if the provided API key is in our set of valid keys.
+    """
+    if credentials.credentials in VALID_API_KEYS:
+        return True
     raise HTTPException(
-        status_code=401, 
-        detail="Unauthorized: Invalid API Key. Please provide a valid 'Bearer YOUR_API_KEY' in the Authorization header."
+        status_code=401,
+        detail="Unauthorized: Invalid or missing API Key."
     )
 
 # Pydantic models for structured responses (unchanged)
