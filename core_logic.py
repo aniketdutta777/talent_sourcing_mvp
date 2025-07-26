@@ -10,6 +10,9 @@ import random
 # --- CHROMA DB COLLECTION NAME (DEFINED GLOBALLY) ---
 COLLECTION_NAME = "all_resumes" 
 
+# --- DATABASE DIRECTORY (DEFINED GLOBALLY) ---
+DATABASE_DIR = "./mock_resume_database" 
+
 # --- GLOBAL CLIENT PLACEHOLDERS ---
 # These will be assigned their actual client objects AFTER initialize_api_clients() is called.
 # They are initialized to None here to prevent crashes if used before initialization.
