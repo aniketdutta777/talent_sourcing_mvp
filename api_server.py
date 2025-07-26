@@ -4,8 +4,7 @@ from pydantic import BaseModel, Field
 import uvicorn
 import json 
 import os 
-# from dotenv import load_dotenv # <--- ENSURE THIS LINE IS COMMENTED OR DELETED 
-                               # It's not needed when deployed to Railway as variables are injected.
+# from dotenv import load_dotenv # <--- ENSURE THIS LINE IS COMMENTED OR DELETED (not needed when deployed)
 
 # Import the core logic functions and GLOBAL variables from core_logic.py
 # IMPORTANT: initialize_api_clients MUST be called in @app.on_event("startup")
@@ -34,16 +33,14 @@ def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security_
     # print(f"DEBUG AUTH: Received credential: '{credentials.credentials}'") # Can uncomment for debugging
     # print(f"DEBUG AUTH: Expected key: '{global_mock_api_key}'") # Can uncomment for debugging
 
-   # Access the key from app.state, ensuring it's available after startup
-# Use app.state directly here as verify_api_key is a dependency of the app
-expected_key = app.state.global_mock_api_key 
+    # Check if the global_mock_api_key was loaded successfully by initialize_api_clients
+    if global_mock_api_key is None:
+        # This error occurs if initialize_api_clients() failed or wasn't called.
+        # This will now correctly raise an internal error if env var setup fails on Railway.
+        raise HTTPException(status_code=500, detail="Server Error: API Key not initialized. Please ensure the API server started correctly and clients initialized.")
 
-if expected_key is None:
-    # This means app.state.global_mock_api_key was not set, indicating startup failure
-    raise HTTPException(status_code=500, detail="Server Error: API Key not initialized in app.state during startup.")
-
-if credentials.credentials == expected_key: # Compare with key from app.state
-    return True 
+    if credentials.credentials == global_mock_api_key: # <--- Use the GLOBAL key from core_logic
+        return True 
     raise HTTPException(
         status_code=401, # 401 Unauthorized for invalid credentials
         detail="Unauthorized: Invalid API Key. Please provide a valid 'Bearer YOUR_API_KEY' in the Authorization header."
@@ -82,10 +79,11 @@ async def startup_event():
         # CRUCIAL CALL: This function (from core_logic.py) will now load API keys and initialize clients
         initialize_api_clients() 
         print("DEBUG: API clients initialized.")
-        # Store initialized clients and key in app.state for access by request handlers
+                # Store initialized clients and key in app.state for access by request handlers
         app.state.global_client_openai = core_logic.global_client_openai
         app.state.global_client_anthropic = core_logic.global_client_anthropic
         app.state.global_mock_api_key = core_logic.global_mock_api_key
+
     except Exception as e:
         print(f"CRITICAL ERROR: Failed to initialize API clients: {e}")
         # Re-raise the exception to prevent the application from starting if clients can't be initialized
