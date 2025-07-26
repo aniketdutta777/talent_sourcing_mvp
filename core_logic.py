@@ -5,12 +5,22 @@ import chromadb
 from openai import OpenAI
 from anthropic import Anthropic
 from dotenv import load_dotenv
-import random
+import random 
 
-# Load environment variables (API keys)
+# --- Load environment variables (API keys) and DEBUG prints ---
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+# This key is for your own API authentication. REMOVED DEFAULT VALUE for stricter checking.
+YOUR_MOCK_API_KEY = os.getenv("YOUR_MOCK_API_KEY") 
+
+# --- DEBUG PRINT: VERY IMPORTANT TO SEE THIS OUTPUT ---
+if not YOUR_MOCK_API_KEY:
+    print("CRITICAL DEBUG (core_logic.py): YOUR_MOCK_API_KEY is EMPTY or not loaded! Check .env file.")
+else:
+    print(f"DEBUG (core_logic.py): YOUR_MOCK_API_KEY loaded: '{YOUR_MOCK_API_KEY}'")
+# -----------------------------------------------------
+
 
 # Initialize OpenAI client for embeddings
 client_openai = OpenAI(api_key=OPENAI_API_KEY)
@@ -95,11 +105,11 @@ def initialize_database(num_resumes=100):
         docs_to_add.append(raw_text)
         metadatas_to_add.append({
             "resume_id": resume_id,
-            "name": resume.get("name", "N/A"),
-            "job_title": resume.get("job_title", "N/A"),
-            "level": resume.get("level", "N/A"),
-            "industry": resume.get("industry", "N/A"),
-            "skills": ", ".join(resume.get("skills", [])), 
+            "name": metadata.get("name", "N/A"),
+            "job_title": metadata.get("job_title", "N/A"),
+            "level": metadata.get("level", "N/A"),
+            "industry": metadata.get("industry", "N/A"),
+            "skills": ", ".join(metadata.get("skills", [])), 
         })
         ids_to_add.append(resume_id)
         embeddings_to_add.append(embedding)
@@ -161,7 +171,7 @@ def resume_search_tool(query: str, num_results: int = 5) -> list[dict]:
             try:
                 with open(resume_file_path, "r") as f:
                     full_resume_data = json.load(f)
-                    raw_text = full_resume_data.get("raw_text", "No raw text available.")
+                    raw_text = full_resume_data.get("raw_text", "No raw text available.") 
             except FileNotFoundError:
                 raw_text = "Raw resume file not found on disk."
                 print(f"Warning: Raw resume file not found for {resume_id}")
@@ -207,10 +217,12 @@ resume_search_tool_schema = {
 }
 
 # --- Claude Tool Use Orchestration Function ---
-def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: int = 7):
+# This function now returns a dictionary ready to be converted to JSON.
+def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: int = 7) -> dict:
     """
     Orchestrates the interaction with Claude using its tool-use capabilities.
     Claude will decide when to call the resume_search_tool.
+    Returns a structured dictionary containing the analysis.
     """
     print(f"\n--- Orchestrating Claude Search for: '{user_query}' ---")
 
@@ -221,6 +233,32 @@ def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: i
         }
     ]
 
+    system_message = """You are an expert HR recruitment assistant. You have access to a `resume_search_tool` to find candidates. 
+    Use this tool when the user asks to find candidates or describes job requirements.
+
+    After successfully using the `resume_search_tool`, analyze the results carefully. Provide a clear, concise summary of the top candidates, their fit, and confidence scores. 
+    Always recommend the top 3 best-fit candidates with reasons.
+
+    YOUR FINAL OUTPUT MUST BE VALID JSON. Structure your response as follows:
+    ```json
+    {
+      "overall_summary": "Overall summary of the search results.",
+      "candidates": [
+        {
+          "id": "candidate_id_from_tool_output",
+          "name": "Candidate Name from GlobalSolutions Inc.",
+          "confidence_score": "X/5" or "Y%",
+          "job_title": "Candidate Job Title", # Added job_title for clarity in structured output
+          "justification": "Detailed reason why this candidate is a good/bad fit, linking their profile details to the query. Refer to their skills, experience, and industry from the tool output."
+        },
+        // ... more candidates up to the number provided by the tool output
+      ],
+      "overall_recommendation": "Overall recommendation or final thoughts."
+    }
+    ```
+    Ensure the JSON is well-formed, including commas and correct curly braces. Do not include markdown outside the ```json block unless asked for.
+    """
+
     # First call to Claude: Provide the user's query and the available tool
     try:
         response = client_anthropic.messages.create(
@@ -229,10 +267,11 @@ def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: i
             temperature=0.0, # Set temperature low for more deterministic tool use
             tools=[resume_search_tool_schema], # Provide the tool schema
             messages=messages,
-            system="You are an expert HR recruitment assistant. You have access to a `resume_search_tool` to find candidates. Use this tool when the user asks to find candidates or describes job requirements. After using the tool, analyze the results and provide a clear, concise summary of the top candidates, their fit, and confidence scores. Always recommend the top 3 best-fit candidates with reasons."
+            system=system_message # Pass the system message here
         )
     except Exception as e:
-        return f"Error initiating conversation with Claude: {e}. Check your Anthropic API key."
+        print(f"Error initiating conversation with Claude: {e}. Check your Anthropic API key.")
+        return {"status": "error", "message": f"Error initiating conversation with Claude: {e}"}
 
     # Process Claude's first response
     if response.stop_reason == "tool_use":
@@ -244,11 +283,8 @@ def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: i
 
         # Validate and execute the tool
         if tool_name == "resume_search_tool":
-            # Ensure num_results from Claude doesn't exceed our max
-            # THIS LINE HAS BEEN CORRECTED FOR THE SYNTAX ERROR
             requested_num_results = min(tool_input.get("num_results", 5), num_profiles_to_retrieve)
             
-            # Execute the actual Python function that represents the tool
             tool_output = resume_search_tool(
                 query=tool_input.get("query"),
                 num_results=requested_num_results
@@ -256,14 +292,23 @@ def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: i
             print(f"Tool execution complete. Results: {len(tool_output)} candidates found.")
             
             # Send the tool's output back to Claude
-            messages.append({"role": "assistant", "content": [tool_use]})
+            messages.append({"role": "assistant", "content": [tool_use]}) 
             messages.append({
                 "role": "user",
                 "content": [
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_use.id,
-                        "content": json.dumps(tool_output) 
+                        "content": json.dumps(tool_output) # Send tool output as JSON string
+                    },
+                    # ADD THIS NEW MESSAGE TO INSTRUCT CLAUDE FOR JSON OUTPUT
+                    {
+                        "type": "text",
+                        "text": """
+                        Based on the tool results and the initial query, provide your analysis and top recommendations.
+                        Format your entire response as a JSON object with the structure defined in the system prompt.
+                        Ensure the JSON is well-formed and valid. Do not include any text outside the JSON block.
+                        """
                     }
                 ]
             })
@@ -272,21 +317,39 @@ def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: i
             try:
                 final_response = client_anthropic.messages.create(
                     model="claude-3-haiku-20240307", # Use the same model
-                    max_tokens=1500,
-                    temperature=0.5, # Can increase temperature slightly for more creative response
+                    max_tokens=1500, # Increased max_tokens as JSON can be verbose
+                    temperature=0.5, 
                     messages=messages,
-                    system="You are an expert HR recruitment assistant. You have access to a `resume_search_tool` to find candidates. Use this tool when the user asks to find candidates or describes job requirements. After using the tool, analyze the results and provide a clear, concise summary of the top candidates, their fit, and confidence scores. Always recommend the top 3 best-fit candidates with reasons."
+                    system=system_message # Pass the system message again
                 )
-                return final_response.content[0].text
+                
+                # Attempt to parse Claude's response as JSON
+                try:
+                    # Claude sometimes wraps JSON in markdown, so extract it
+                    json_string = final_response.content[0].text
+                    if json_string.startswith("```json") and json_string.endswith("```"):
+                        json_string = json_string[len("```json"): -len("```")].strip()
+                    
+                    parsed_json = json.loads(json_string)
+                    return {"status": "success", "analysis_data": parsed_json}
+
+                except json.JSONDecodeError as json_e:
+                    print(f"Error parsing Claude's JSON response: {json_e}")
+                    print(f"Claude's raw response was: {final_response.content[0].text}")
+                    return {"status": "error", "message": "LLM response was not valid JSON.", "raw_llm_output": final_response.content[0].text}
+
             except Exception as e:
-                return f"Error getting final response from Claude after tool use: {e}"
+                print(f"Error getting final response from Claude after tool use: {e}")
+                return {"status": "error", "message": f"Error getting final response from Claude after tool use: {e}"}
         else:
-            return f"Claude requested an unknown tool: {tool_name}"
+            return {"status": "error", "message": f"Claude requested an unknown tool: {tool_name}"}
     elif response.stop_reason == "end_turn":
         # Claude decided it didn't need a tool (e.g., simple greeting)
-        return response.content[0].text
+        print("Claude finished its turn without tool use.")
+        return {"status": "success", "message": response.content[0].text}
     else:
-        return f"Unexpected Claude response stop reason: {response.stop_reason}. Content: {response.content[0].text if response.content else 'No content'}"
+        print(f"Unexpected Claude response stop reason: {response.stop_reason}. Content: {response.content[0].text if response.content else 'No content'}")
+        return {"status": "error", "message": "Unexpected response from Claude."}
 
 
 # --- Helper: Generate Fake Resume Data (for database initialization) ---
@@ -320,7 +383,6 @@ def generate_fake_resume_data(num_resumes=10):
         
         # --- FIX APPLIED HERE: Simplified email generation to avoid f-string complexity ---
         email_local_part = name.lower().replace(' ', '.')
-        # Removed problematic .replace('from.globalsolutions.inc.', '') directly in f-string
         email_local_part = email_local_part.replace('..', '.') # Clean up potential double dots if name has multiple spaces
 
         full_raw_text = (
