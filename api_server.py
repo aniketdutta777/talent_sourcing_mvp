@@ -128,46 +128,8 @@ async def search_candidates(request: SearchRequest, api_key: str = Depends(get_a
     except Exception as e:
         print(f"Error during LLM analysis in API: {e}")
         raise HTTPException(status_code=500, detail=f"Internal Server Error during LLM analysis: {e}")
-async def search_candidates(request: SearchRequest):
-    """
-    Receives a natural language query for candidates and returns LLM-analyzed results.
-    This endpoint serves as your "MCP" interface to your talent database.
-    It takes a client's query (potentially from their LLM context) and returns
-    candidates analyzed by your Claude instance.
-    """
-    print(f"\n--- API Call: /v1/search_candidates ---")
-    print(f"Received query: '{request.query}' for {request.num_results} results.")
 
-    # Ensure database is accessible/initialized before performing search
-    try:
-        # Use core_logic.chroma_client and core_logic.COLLECTION_NAME
-        collection = core_logic.chroma_client.get_collection(name=core_logic.COLLECTION_NAME) 
-        if collection.count() == 0:
-            raise HTTPException(status_code=500, detail="Database not initialized. Please ensure the API server started correctly.")
-        # Verify global clients are still initialized (redundant with app.state, but adds safety)
-        if core_logic.global_client_openai is None or core_logic.global_client_anthropic is None:
-            raise HTTPException(status_code=500, detail="LLM clients not available post-startup. Check server logs.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database access error: {e}. Please ensure the API server started correctly.")
-
-    try:
-        # Call perform_claude_search_with_tool with core_logic. prefix
-        result_data = core_logic.perform_claude_search_with_tool( 
-            user_query=request.query, 
-            num_profiles_to_retrieve=request.num_results
-        )
-
-        if result_data["status"] == "success" and "analysis_data" in result_data:
-            return SearchResponseWrapper(
-                status=result_data["status"],
-                analysis_data=result_data["analysis_data"]
-            )
-        else:
-            raise HTTPException(status_code=500, detail=f"LLM analysis failed: {result_data.get('message', 'Unknown error')}. Raw output: {result_data.get('raw_llm_output', 'N/A')}")
-
-    except Exception as e:
-        print(f"Error during LLM analysis in API: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal Server Error during LLM analysis: {e}")
+# THE DUPLICATED search_candidates FUNCTION BLOCK HAS BEEN DELETED FROM HERE
 
 @app.get("/", summary="API Root / Health Check")
 async def read_root():

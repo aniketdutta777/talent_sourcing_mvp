@@ -364,12 +364,12 @@ def _perform_claude_search_with_tool_internal(user_query: str, num_profiles_to_r
                     return {"status": "success", "analysis_data": parsed_json, "usage": usage_data}
 
                 except json.JSONDecodeError as json_e:
-                    print(f"Error parsing Claude's JSON response: {json_e}")ß
+                    print(f"Error parsing Claude's JSON response: {json_e}")
                     print(f"Claude's raw response was: {final_response.content[0].text}")
                     return {"status": "error", "message": "LLM response was not valid JSON.", "raw_llm_output": final_response.content[0].text}
 
             except Exception as e:
-                print(f"Error getting final response from Claude after tool use: {e}")ß
+                print(f"Error getting final response from Claude after tool use: {e}")
                 return {"status": "error", "message": f"Error getting final response from Claude after tool use: {e}"}
         else:
             return {"status": "error", "message": f"Claude requested an unknown tool: {tool_name}"}
