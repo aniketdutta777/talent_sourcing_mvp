@@ -84,17 +84,20 @@ if st.button("Find Matching Profiles", type="primary"):
                     if analysis:
                         st.markdown(f"**Overall Summary:** {analysis.get('overall_summary', 'No summary provided.')}")
                         st.markdown("---")
-                        
-                        # Loop through and display each recommended candidate
+
+                        # This loop correctly displays the new data structure
                         for i, candidate in enumerate(analysis.get('candidates', [])):
-                            st.markdown(f"**{i+1}. {candidate.get('name', 'N/A')}** (Confidence: {candidate.get('confidence_score', 'N/A')})")
-                            st.markdown(f"**Job Title:** {candidate.get('job_title', 'N/A')}")
-                            with st.expander("See AI Justification"):
-                                st.markdown(f"{candidate.get('justification', 'N/A')}")
-                            st.markdown("") 
-                        
-                        st.markdown("---")
-                        st.markdown(f"**Final Recommendation:** {analysis.get('overall_recommendation', 'N/A')}")
+                            st.markdown(f"**{i+1}. {candidate.get('name', 'N/A')}**")
+
+                            contact_info = candidate.get('contact_information', {})
+                            st.markdown(f"**Contact:** {contact_info.get('email', 'N/A')} | {contact_info.get('phone', 'N/A')}")
+                            st.markdown(f"**Resume:** [Link to PDF]({candidate.get('resume_pdf_url', '#')})")
+
+                            with st.expander("See AI Summary"):
+                                st.markdown(f"{candidate.get('summary', 'No summary provided.')}")
+                            st.markdown("---")
+
+                        st.markdown(f"**Overall Recommendation:** {analysis.get('overall_recommendation', 'N/A')}")
                     else:
                         st.warning("The AI provided a response, but it did not contain structured analysis data.")
 
