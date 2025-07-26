@@ -157,7 +157,7 @@ def initialize_database(num_resumes=100):
             "job_title": resume.get("job_title", "N/A"),
             "level": resume.get("level", "N/A"),            
             "industry": resume.get("industry", "N/A"),   
-            "skills": ", ".join(resume.get("skills", [])),
+            "skills": ", ".join(resume.get("skills", [])), # Corrected
         })
         ids_to_add.append(resume_id)
         embeddings_to_add.append(embedding)
@@ -357,15 +357,19 @@ def _perform_claude_search_with_tool_internal(user_query: str, num_profiles_to_r
                         json_string = json_string[len("```json"): -len("```")].strip()
                     
                     parsed_json = json.loads(json_string)
-                    return {"status": "success", "analysis_data": parsed_json}
+                    usage_data = {
+                        "input_tokens": final_response.usage.input_tokens,
+                        "output_tokens": final_response.usage.output_tokens
+                        }
+                    return {"status": "success", "analysis_data": parsed_json, "usage": usage_data}
 
                 except json.JSONDecodeError as json_e:
-                    print(f"Error parsing Claude's JSON response: {json_e}")
+                    print(f"Error parsing Claude's JSON response: {json_e}")ß
                     print(f"Claude's raw response was: {final_response.content[0].text}")
                     return {"status": "error", "message": "LLM response was not valid JSON.", "raw_llm_output": final_response.content[0].text}
 
             except Exception as e:
-                print(f"Error getting final response from Claude after tool use: {e}")
+                print(f"Error getting final response from Claude after tool use: {e}")ß
                 return {"status": "error", "message": f"Error getting final response from Claude after tool use: {e}"}
         else:
             return {"status": "error", "message": f"Claude requested an unknown tool: {tool_name}"}

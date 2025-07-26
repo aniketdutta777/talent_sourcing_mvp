@@ -27,17 +27,16 @@ app = FastAPI(
 security_scheme = HTTPBearer()
 
 # Dependency function to check the API key
-def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security_scheme)):
+def get_api_key(credentials: HTTPAuthorizationCredentials = Depends(security_scheme)):
     """
-    Checks if the provided API key is in our set of valid keys.
+    Checks if the provided API key is valid and returns it.
     """
     if credentials.credentials in VALID_API_KEYS:
-        return True
+        return credentials.credentials  # Return the key on success
     raise HTTPException(
         status_code=401,
         detail="Unauthorized: Invalid or missing API Key."
     )
-
 # Pydantic models for structured responses (unchanged)
 class Candidate(BaseModel):
     id: str = Field(..., description="Unique ID of the candidate.")
@@ -88,10 +87,47 @@ async def startup_event():
     except Exception as e:
         print(f"Error during database startup check/initialization: {e}")
 
-@app.post("/v1/search_candidates", 
-          summary="Search for candidates using LLM intelligence", 
-          response_model=SearchResponseWrapper, 
-          dependencies=[Depends(verify_api_key)]) 
+@app.post("/v1/search_candidates",
+          summary="Search for candidates using LLM intelligence",
+          response_model=SearchResponseWrapper)
+async def search_candidates(request: SearchRequest, api_key: str = Depends(get_api_key)):
+    """
+    Receives a natural language query for candidates and returns LLM-analyzed results.
+    This endpoint now logs token usage for each successful request.
+    """
+    print(f"\n--- API Call: /v1/search_candidates (Key ending with '...{api_key[-4:]}') ---")
+    print(f"Received query: '{request.query}' for {request.num_results} results.")
+
+    # Ensure database is accessible/initialized before performing search
+    try:
+        collection = core_logic.chroma_client.get_collection(name=core_logic.COLLECTION_NAME)
+        if collection.count() == 0:
+            raise HTTPException(status_code=500, detail="Database not initialized.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database access error: {e}")
+
+    try:
+        result_data = core_logic.perform_claude_search_with_tool(
+            user_query=request.query,
+            num_profiles_to_retrieve=request.num_results
+        )
+
+        if result_data["status"] == "success" and "analysis_data" in result_data:
+            # --- COST TRACKING LOG ---
+            usage = result_data.get("usage", {"input_tokens": 0, "output_tokens": 0})
+            print(f"COST_LOG: key='{api_key}' usage={usage}")
+            # -------------------------
+
+            return SearchResponseWrapper(
+                status=result_data["status"],
+                analysis_data=result_data["analysis_data"]
+            )
+        else:
+            raise HTTPException(status_code=500, detail=f"LLM analysis failed: {result_data.get('message', 'Unknown error')}")
+
+    except Exception as e:
+        print(f"Error during LLM analysis in API: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal Server Error during LLM analysis: {e}")
 async def search_candidates(request: SearchRequest):
     """
     Receives a natural language query for candidates and returns LLM-analyzed results.
