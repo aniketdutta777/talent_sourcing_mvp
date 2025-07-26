@@ -6,17 +6,8 @@ import json
 import os 
 # from dotenv import load_dotenv # <--- ENSURE THIS LINE IS COMMENTED OR DELETED (not needed when deployed)
 
-# Import the core logic functions and GLOBAL variables from core_logic.py
-# IMPORTANT: initialize_api_clients MUST be called in @app.on_event("startup")
-# global_mock_api_key will be available after initialize_api_clients() runs.
-from core_logic import (
-    perform_claude_search_with_tool, 
-    initialize_database, 
-    chroma_client, 
-    COLLECTION_NAME, 
-    initialize_api_clients, # <--- CRUCIAL: Import this function to initialize clients
-    global_mock_api_key     # <--- CRUCIAL: This will hold the YOUR_MOCK_API_KEY after initialization
-)
+# Import core_logic as a module to correctly access its global variables and functions
+import core_logic # <--- CRUCIAL CHANGE: Import core_logic as a module
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -30,23 +21,21 @@ security_scheme = HTTPBearer()
 
 # Dependency function to check the API key
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security_scheme)):
-    # print(f"DEBUG AUTH: Received credential: '{credentials.credentials}'") # Can uncomment for debugging
-    # print(f"DEBUG AUTH: Expected key: '{global_mock_api_key}'") # Can uncomment for debugging
+    # print(f"DEBUG AUTH: Received credential: '{credentials.credentials}'") 
+    # print(f"DEBUG AUTH: Expected key: '{core_logic.global_mock_api_key}'") # Use core_logic.global_mock_api_key here
 
     # Check if the global_mock_api_key was loaded successfully by initialize_api_clients
-    if global_mock_api_key is None:
-        # This error occurs if initialize_api_clients() failed or wasn't called.
-        # This will now correctly raise an internal error if env var setup fails on Railway.
+    if core_logic.global_mock_api_key is None: # <--- Use core_logic.global_mock_api_key
         raise HTTPException(status_code=500, detail="Server Error: API Key not initialized. Please ensure the API server started correctly and clients initialized.")
 
-    if credentials.credentials == global_mock_api_key: # <--- Use the GLOBAL key from core_logic
+    if credentials.credentials == core_logic.global_mock_api_key: # <--- Use core_logic.global_mock_api_key
         return True 
     raise HTTPException(
-        status_code=401, # 401 Unauthorized for invalid credentials
+        status_code=401, 
         detail="Unauthorized: Invalid API Key. Please provide a valid 'Bearer YOUR_API_KEY' in the Authorization header."
     )
 
-# Pydantic models for structured responses (unchanged from previous correct version)
+# Pydantic models for structured responses (unchanged)
 class Candidate(BaseModel):
     id: str = Field(..., description="Unique ID of the candidate.")
     name: str = Field(..., description="Name of the candidate.")
@@ -77,31 +66,24 @@ async def startup_event():
     print("\n--- FastAPI Startup: Initializing API Clients & Checking Database ---")
     try:
         # CRUCIAL CALL: This function (from core_logic.py) will now load API keys and initialize clients
-        initialize_api_clients() 
+        core_logic.initialize_api_clients() # <--- CALL WITH core_logic. PREFIX
         print("DEBUG: API clients initialized.")
-                # Store initialized clients and key in app.state for access by request handlers
-        app.state.global_client_openai = core_logic.global_client_openai
-        app.state.global_client_anthropic = core_logic.global_client_anthropic
-        app.state.global_mock_api_key = core_logic.global_mock_api_key
-
     except Exception as e:
         print(f"CRITICAL ERROR: Failed to initialize API clients: {e}")
-        # Re-raise the exception to prevent the application from starting if clients can't be initialized
         raise HTTPException(status_code=500, detail=f"API Client Initialization Failed: {e}") 
-        
-    # Rest of the database initialization check (unchanged)
+
+    # Rest of the database initialization check 
     try:
-        collection = chroma_client.get_collection(name=COLLECTION_NAME)
+        # Use core_logic.chroma_client and core_logic.COLLECTION_NAME
+        collection = core_logic.chroma_client.get_collection(name=core_logic.COLLECTION_NAME) 
         if collection.count() == 0:
             print("Database empty. Initializing with 100 mock resumes...")
-            initialize_database(100) 
+            core_logic.initialize_database(100) # <--- CALL WITH core_logic. PREFIX
             print("Database initialization complete.")
         else:
             print(f"Database already initialized with {collection.count()} resumes.")
     except Exception as e:
         print(f"Error during database startup check/initialization: {e}")
-        # In a production system, you'd want more robust error handling or health checks here.
-
 
 @app.post("/v1/search_candidates", 
           summary="Search for candidates using LLM intelligence", 
@@ -119,18 +101,23 @@ async def search_candidates(request: SearchRequest):
 
     # Ensure database is accessible/initialized before performing search
     try:
-        collection = chroma_client.get_collection(name=COLLECTION_NAME)
+        # Use core_logic.chroma_client and core_logic.COLLECTION_NAME
+        collection = core_logic.chroma_client.get_collection(name=core_logic.COLLECTION_NAME) 
         if collection.count() == 0:
             raise HTTPException(status_code=500, detail="Database not initialized. Please ensure the API server started correctly.")
+        # Verify global clients are still initialized (redundant with app.state, but adds safety)
+        if core_logic.global_client_openai is None or core_logic.global_client_anthropic is None:
+            raise HTTPException(status_code=500, detail="LLM clients not available post-startup. Check server logs.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database access error: {e}. Please ensure the API server started correctly.")
 
     try:
-        result_data = perform_claude_search_with_tool(
+        # Call perform_claude_search_with_tool with core_logic. prefix
+        result_data = core_logic.perform_claude_search_with_tool( 
             user_query=request.query, 
             num_profiles_to_retrieve=request.num_results
         )
-        
+
         if result_data["status"] == "success" and "analysis_data" in result_data:
             return SearchResponseWrapper(
                 status=result_data["status"],
@@ -138,16 +125,11 @@ async def search_candidates(request: SearchRequest):
             )
         else:
             raise HTTPException(status_code=500, detail=f"LLM analysis failed: {result_data.get('message', 'Unknown error')}. Raw output: {result_data.get('raw_llm_output', 'N/A')}")
-            
+
     except Exception as e:
         print(f"Error during LLM analysis in API: {e}")
         raise HTTPException(status_code=500, detail=f"Internal Server Error during LLM analysis: {e}")
 
-# --- Root endpoint for health check or basic info --- (unchanged)
 @app.get("/", summary="API Root / Health Check")
 async def read_root():
-    """A simple health check endpoint."""
     return {"message": "Talent Search MCP API is running. Go to /docs for API documentation."}
-
-# You can run this API server from your terminal using:
-# uvicorn api_server:app --reload --port 8000
