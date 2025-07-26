@@ -150,8 +150,11 @@ resume_search_tool_schema = {
     }
 }
 
+# In core_logic.py
+
 def _perform_claude_search_with_tool_internal(user_query: str, num_profiles_to_retrieve: int = 7) -> dict:
-    system_message = """You are an expert HR recruitment assistant. Use the `resume_search_tool` to find candidates. After using the tool, analyze the results and provide a summary. YOUR FINAL OUTPUT MUST BE VALID JSON. Structure your response as follows:
+    """Internal helper for perform_claude_search_with_tool that uses global client."""
+    system_message = """You are an expert HR recruitment assistant. Use the `resume_search_tool` to find candidates. After using the tool, analyze the results and provide a summary. If the tool returns no candidates, inform the user clearly. YOUR FINAL OUTPUT MUST BE VALID JSON. Structure your response as follows:
 ```json
 {
   "overall_summary": "Overall summary of the search results and candidate quality.",
@@ -170,29 +173,52 @@ def _perform_claude_search_with_tool_internal(user_query: str, num_profiles_to_r
 }
 ```"""
     messages = [{"role": "user", "content": user_query}]
-    response = global_client_anthropic.messages.create(
-        model="claude-3-haiku-20240307", max_tokens=2000, temperature=0.0,
-        tools=[resume_search_tool_schema], messages=messages, system=system_message
-    )
+
+    try:
+        # First call to Claude to determine if a tool should be used
+        response = global_client_anthropic.messages.create(
+            model="claude-3-haiku-20240307", max_tokens=2000, temperature=0.0,
+            tools=[resume_search_tool_schema], messages=messages, system=system_message
+        )
+    except Exception as e:
+        print(f"Error initiating conversation with Claude: {e}")
+        return {"status": "error", "message": f"Error initiating conversation with Claude: {e}"}
 
     if response.stop_reason == "tool_use":
-        tool_use = next(block for block in response.content if block.type == "tool_use")
+        tool_use = next((block for block in response.content if block.type == "tool_use"), None)
+        if not tool_use:
+             return {"status": "error", "message": "Claude indicated tool use, but no tool was specified."}
+
         tool_output = resume_search_tool(**tool_use.input)
-        messages.extend([
-            response.content[0],
-            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_use.id, "content": json.dumps(tool_output)}]}
-        ])
-        final_response = global_client_anthropic.messages.create(
-            model="claude-3-haiku-20240307", max_tokens=2000, temperature=0.5,
-            messages=messages, system=system_message
-        )
+        
+        # --- CORRECTED MESSAGE BUILDING LOGIC ---
+        # Append the assistant's turn (the tool use request)
+        messages.append({"role": "assistant", "content": response.content})
+        
+        # Append the user's turn (the tool result)
+        messages.append({
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": tool_use.id, "content": json.dumps(tool_output)}]
+        })
+        # ----------------------------------------
+
         try:
+            # Second call to Claude with the tool result
+            final_response = global_client_anthropic.messages.create(
+                model="claude-3-haiku-20240307", max_tokens=2000, temperature=0.5,
+                messages=messages, system=system_message
+            )
+            
             json_string = final_response.content[0].text.strip().lstrip("```json").rstrip("```").strip()
             parsed_json = json.loads(json_string)
             usage_data = {"input_tokens": final_response.usage.input_tokens, "output_tokens": final_response.usage.output_tokens}
             return {"status": "success", "analysis_data": parsed_json, "usage": usage_data}
-        except (json.JSONDecodeError, IndexError) as e:
-            return {"status": "error", "message": f"LLM response was not valid JSON: {e}", "raw_llm_output": final_response.content[0].text if final_response.content else ""}
+            
+        except Exception as e:
+            print(f"Error during final LLM analysis: {e}")
+            raw_output = final_response.content[0].text if final_response.content else "No content"
+            return {"status": "error", "message": f"LLM analysis failed: {e}", "raw_llm_output": raw_output}
+            
     return {"status": "error", "message": "Claude did not use the tool as expected."}
 
 def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: int = 7) -> dict:
