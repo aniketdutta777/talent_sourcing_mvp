@@ -83,24 +83,43 @@ def initialize_database(num_resumes=100):
         )
     print(f"Successfully added {len(resumes_data)} resumes to ChromaDB.")
 
+# In core_logic.py
+
 def resume_search_tool(query: str, num_results: int = 5, level: str = None, industry: str = None) -> list[dict]:
-    print(f"\n--- Tool Call: resume_search_tool(query='{query}', level='{level}', industry='{industry}') ---")
+    """
+    Searches the resume database for candidates matching the given query,
+    with optional filtering by level and industry using the correct ChromaDB syntax.
+    """
+    print(f"\n--- Tool Call: resume_search_tool(query='{query}', num_results={num_results}, level='{level}', industry='{industry}') ---")
     collection = chroma_client.get_collection(name=COLLECTION_NAME)
-    
-    where_filter = {}
-    if level: where_filter["level"] = level
-    if industry: where_filter["industry"] = industry
-    
+    embedding = get_embedding(query)
+
+    # --- CORRECTED: Build the metadata filter (where clause) for ChromaDB ---
+    filter_conditions = []
+    if level:
+        filter_conditions.append({"level": {"$eq": level}})
+    if industry:
+        filter_conditions.append({"industry": {"$eq": industry}})
+
+    where_filter = None
+    if len(filter_conditions) > 1:
+        where_filter = {"$and": filter_conditions}
+    elif len(filter_conditions) == 1:
+        where_filter = filter_conditions[0]
+
+    print(f"ChromaDB Query Filter: {where_filter}")
+    # -------------------------------------------------------------------------
+
     results = collection.query(
-        query_embeddings=[get_embedding(query)],
+        query_embeddings=[embedding],
         n_results=num_results,
-        where=where_filter if where_filter else None,
+        where=where_filter,  # Apply the correctly formatted filter
         include=['metadatas', 'documents']
     )
 
     candidates_data = []
     if results and results['ids'] and results['ids'][0]:
-        print(f"Tool: Found {len(results['ids'][0])} potential candidates.")
+        print(f"Tool: Found {len(results['ids'][0])} potential candidates matching filters.")
         for i, metadata in enumerate(results['metadatas'][0]):
             candidates_data.append({
                 "name": metadata.get("name"),
@@ -111,8 +130,11 @@ def resume_search_tool(query: str, num_results: int = 5, level: str = None, indu
                 "resume_pdf_url": metadata.get("pdf_url"),
                 "raw_resume_text": results['documents'][0][i]
             })
-    return candidates_data
+    else:
+        print("Tool: No candidates found for the query with the specified filters.")
+        return [{"message": "No candidates found matching the search criteria and filters."}]
 
+    return candidates_data
 resume_search_tool_schema = {
     "name": "resume_search_tool",
     "description": "Searches a resume database to find profiles matching a job query. Supports filtering by experience level and industry.",
