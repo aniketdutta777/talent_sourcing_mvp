@@ -23,35 +23,37 @@ def initialize_api_clients():
     global global_client_openai, global_client_anthropic, global_mock_api_key
 
     # Load keys *within* this function, when environment variables are injected and ready
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-    YOUR_MOCK_API_KEY = os.getenv("YOUR_MOCK_API_KEY")
+   # Load keys *within* this function, when environment variables are injected and ready
+    # --- IMPORTANT: Adding a fallback value for DEBUGGING PURPOSES only ---
+    # If os.getenv returns None, these will default to dummy strings.
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "DEBUG_OPENAI_KEY_FALLBACK") 
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "DEBUG_ANTHROPIC_KEY_FALLBACK")
+    YOUR_MOCK_API_KEY = os.getenv("YOUR_MOCK_API_KEY", "DEBUG_MOCK_KEY_FALLBACK")
 
-    # --- DEBUG PRINTS for API Keys ---
-    if not OPENAI_API_KEY:
-        print("CRITICAL DEBUG (core_logic.py - init_api): OPENAI_API_KEY is EMPTY!")
-        raise ValueError("OPENAI_API_KEY environment variable is not set correctly on Railway.")
+    # --- DEBUG PRINTS for API Keys (now modified to check against fallbacks) ---
+    if OPENAI_API_KEY == "DEBUG_OPENAI_KEY_FALLBACK": # Check if it used the fallback
+        print("CRITICAL DEBUG (core_logic.py - init_api): OPENAI_API_KEY is EMPTY (using debug fallback)!")
+        # We will NOT raise ValueError here for now, to let the app start and see subsequent errors.
     else:
         print(f"DEBUG (core_logic.py - init_api): OPENAI_API_KEY loaded: '{OPENAI_API_KEY[:4]}...{OPENAI_API_KEY[-4:]}'")
 
-    if not ANTHROPIC_API_KEY:
-        print("CRITICAL DEBUG (core_logic.py - init_api): ANTHROPIC_API_KEY is EMPTY!")
-        raise ValueError("ANTHROPIC_API_KEY environment variable is not set correctly on Railway.")
+    if ANTHROPIC_API_KEY == "DEBUG_ANTHROPIC_KEY_FALLBACK": # Check if it used the fallback
+        print("CRITICAL DEBUG (core_logic.py - init_api): ANTHROPIC_API_KEY is EMPTY (using debug fallback)!")
     else:
         print(f"DEBUG (core_logic.py - init_api): ANTHROPIC_API_KEY loaded: '{ANTHROPIC_API_KEY[:4]}...{ANTHROPIC_API_KEY[-4:]}'")
 
-    if not YOUR_MOCK_API_KEY:
-        print("CRITICAL DEBUG (core_logic.py - init_api): YOUR_MOCK_API_KEY is EMPTY!")
-        # This one won't crash the API client initialization, but will cause 401 later if missing.
+    if YOUR_MOCK_API_KEY == "DEBUG_MOCK_KEY_FALLBACK": # Check if it used the fallback
+        print("CRITICAL DEBUG (core_logic.py - init_api): YOUR_MOCK_API_KEY is EMPTY (using debug fallback)!")
     else:
         print(f"DEBUG (core_logic.py - init_api): YOUR_MOCK_API_KEY loaded: '{YOUR_MOCK_API_KEY}'")
     # ------------------------------------
 
     # Initialize global client objects *here*, AFTER environment variables are loaded and checked
+    # These will now get the 'debug_key' if the real ones are not set.
     global_client_openai = OpenAI(api_key=OPENAI_API_KEY)
     global_client_anthropic = Anthropic(api_key=ANTHROPIC_API_KEY)
-    global_mock_api_key = YOUR_MOCK_API_KEY # Assign the loaded mock key globally
-
+    global_mock_api_key = YOUR_MOCK_API_KEY
+    # ------------------------------------
 
 # --- ChromaDB Client (Configured for Remote PostgreSQL via Environment Variables) ---
 # This remains outside the initialization function as ChromaDB is configured via env vars directly.
