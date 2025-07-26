@@ -7,6 +7,9 @@ from anthropic import Anthropic
 # from dotenv import load_dotenv # Ensure this line is commented or deleted from previous steps
 import random 
 
+# --- CHROMA DB COLLECTION NAME (DEFINED GLOBALLY) ---
+COLLECTION_NAME = "all_resumes" 
+
 # --- GLOBAL CLIENT PLACEHOLDERS ---
 # These will be assigned their actual client objects AFTER initialize_api_clients() is called.
 # They are initialized to None here to prevent crashes if used before initialization.
@@ -64,8 +67,6 @@ except Exception as e:
     print(f"CRITICAL ERROR: Failed to initialize ChromaDB client with persistent backend: {e}")
     print("Falling back to local (ephemeral) ChromaDB client. Data will NOT persist between restarts on Railway.")
     chroma_client = chromadb.PersistentClient(path=os.path.join(DATABASE_DIR, "chroma_db"))
-
-COLLECTION_NAME = "all_resumes" 
 
 # --- Helper Function: Get Embedding (Uses OpenAI client) ---
 # This function will now use the globally initialized client.
