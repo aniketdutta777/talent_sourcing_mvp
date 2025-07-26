@@ -20,7 +20,7 @@ else:
 # ------------------------------------------------------------------------------
 
 # Define the URL of your new FastAPI server
-API_URL = "web-production-97a15.up.railway.app"
+API_URL = "https://web-production-97a15.up.railway.app"
 
 st.set_page_config(layout="wide", page_title="LLM Talent Sourcing MVP (API Client)")
 
