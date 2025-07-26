@@ -152,12 +152,15 @@ def initialize_database(num_resumes=100):
 
         docs_to_add.append(raw_text)
         metadatas_to_add.append({
-            "resume_id": resume_id,
-            "name": resume.get("name", "N/A"),
-            "job_title": resume.get("job_title", "N/A"),
-            "level": resume.get("level", "N/A"),            
-            "industry": resume.get("industry", "N/A"),   
-            "skills": ", ".join(resume.get("skills", [])), # Corrected
+              "resume_id": resume_id,
+              "name": resume.get("name", "N/A"),
+              "email": resume.get("email", "N/A"),
+              "phone": resume.get("phone", "N/A"),
+              "pdf_url": resume.get("pdf_url", "N/A"),
+              "job_title": resume.get("job_title", "N/A"),    
+              "level": resume.get("level", "N/A"),
+              "industry": resume.get("industry", "N/A"),
+              "skills": ", ".join(resume.get("skills", [])),
         })
         ids_to_add.append(resume_id)
         embeddings_to_add.append(embedding)
@@ -267,31 +270,26 @@ def _perform_claude_search_with_tool_internal(user_query: str, num_profiles_to_r
         }
     ]
 
-    system_message = """You are an expert HR recruitment assistant. You have access to a `resume_search_tool` to find candidates. 
-    Use this tool when the user asks to find candidates or describes job requirements.
-
-    After successfully using the `resume_search_tool`, analyze the results carefully. Provide a clear, concise summary of the top candidates, their fit, and confidence scores. 
-    Always recommend the top 3 best-fit candidates with reasons.
-
-    YOUR FINAL OUTPUT MUST BE VALID JSON. Structure your response as follows:
-    ```json
+    system_message = """You are an expert HR recruitment assistant...
+...
+YOUR FINAL OUTPUT MUST BE VALID JSON. Structure your response as follows:
+```json
+{
+  "overall_summary": "Overall summary of the search results and candidate quality.",
+  "candidates": [
     {
-      "overall_summary": "Overall summary of the search results.",
-      "candidates": [
-        {
-          "id": "candidate_id_from_tool_output",
-          "name": "Candidate Name from GlobalSolutions Inc.",
-          "confidence_score": "X/5" or "Y%",
-          "job_title": "Candidate Job Title", 
-          "justification": "Detailed reason why this candidate is a good/bad fit, linking their profile details to the query. Refer to their skills, experience, and industry from the tool output."
-        },
-        // ... more candidates up to the number provided by the tool output
-      ],
-      "overall_recommendation": "Overall recommendation or final thoughts."
+      "name": "Candidate Name",
+      "contact_information": {
+        "email": "candidate@example.com",
+        "phone": "(123) 555-1234"
+      },
+      "summary": "A concise summary of why this candidate is a good fit, referencing their skills and experience against the job query.",
+      "resume_pdf_url": "[https://example.com/resumes/candidate_id.pdf](https://example.com/resumes/candidate_id.pdf)"
     }
-    ```
-    Ensure the JSON is well-formed, including commas and correct curly braces. Do not include markdown outside the ```json block unless asked for.
-    """
+  ],
+  "overall_recommendation": "Final thoughts on the candidate pool and a recommendation for who to interview first."
+}
+    ``` """
 
     try:
         response = global_client_anthropic.messages.create( # Use global_client_anthropic here
@@ -395,7 +393,56 @@ def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: i
 
 
 # --- Helper: Generate Fake Resume Data (for database initialization) ---
+# In core_logic.py
 def generate_fake_resume_data(num_resumes=10):
+    # ... (keep the initial lists like skills_list, roles_list, etc. the same) ...
+    # The following is the main loop part of the function
+    resumes = []
+    skills_list = ["Python", "Java", "SQL", "AWS", "Azure", "GCP", "Machine Learning", "Data Analysis", "Project Management", "Marketing Strategy", "Sales Leadership", "Financial Modeling", "HR Management", "Product Management", "UI/UX Design", "Backend Development", "Frontend Development", "DevOps", "Cybersecurity", "Blockchain", "Salesforce CRM", "SAP ERP"]
+    roles_list = ["Software Engineer", "Data Scientist", "Product Manager", "Marketing Manager", "Sales Executive", "HR Business Partner", "Financial Analyst", "UX Designer", "DevOps Engineer", "Business Analyst", "Technical Lead", "Director of Engineering", "VP of Sales"]
+    industries_list = ["Tech", "Finance", "Healthcare", "Retail", "SaaS", "Biotech", "Manufacturing", "E-commerce", "Consulting", "Automotive"]
+    levels_list = ["Junior", "Mid", "Senior", "Lead", "Manager", "Director", "VP"]
+    companies_list = ["Innovate Inc.", "DataDriven Corp.", "CloudSphere LLC", "QuantumLeap Solutions", "Synergy Systems", "NextGen Tech", "Apex Financials", "HealthFirst Medtech"]
+    universities_list = ["State University", "Tech Institute", "City College", "Northern University", "Southern Polytechnic"]
+
+    for i in range(num_resumes):
+        resume_id = str(uuid.uuid4())
+        company1 = random.choice(companies_list)
+        company2 = random.choice([c for c in companies_list if c != company1])
+
+        job_title = random.choice(roles_list)
+        industry = random.choice(industries_list)
+        level = random.choice(levels_list)
+        candidate_skills = random.sample(skills_list, random.randint(3, 8))
+        experience_years = random.randint(3, 15)
+
+        name = f"Candidate {i+1}"
+        email = f"{name.lower().replace(' ', '.')}{random.randint(10,99)}@example.com"
+        phone = f"(123) 555-{i:04d}"
+        pdf_url = f"https://example.com/resumes/{resume_id}.pdf" # Mock PDF URL
+
+        work_history_text = f"**{company1}** - ...\n**{company2}** - ..." # Abbreviated for clarity
+
+        full_raw_text = (
+            f"Name: {name}\nEmail: {email} | Phone: {phone}\n\n"
+            f"**Summary:** A results-oriented {level} {job_title}...\n\n"
+            f"**Experience:**\n{work_history_text}\n"
+            f"**Education:**\n..."
+        )
+
+        resumes.append({
+            "id": resume_id,
+            "name": name,
+            "email": email,
+            "phone": phone,
+            "pdf_url": pdf_url,
+            "job_title": job_title,
+            "industry": industry,
+            "level": level,
+            "skills": candidate_skills,
+            "raw_text": full_raw_text
+        })
+    return resumes
     """
     Generates a list of fake resume dictionaries. This helps us quickly create
     a test database without needing real resume files.

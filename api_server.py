@@ -38,7 +38,16 @@ def get_api_key(credentials: HTTPAuthorizationCredentials = Depends(security_sch
         detail="Unauthorized: Invalid or missing API Key."
     )
 # Pydantic models for structured responses (unchanged)
+
+class ContactInfo(BaseModel):
+    email: str = Field(..., description="Candidate's email address.")
+    phone: str = Field(..., description="Candidate's phone number.")
+
 class Candidate(BaseModel):
+    name: str = Field(..., description="Name of the candidate.")
+    contact_information: ContactInfo = Field(..., description="Candidate's contact details.")
+    summary: str = Field(..., description="A concise summary of the candidate's fit for the role.")
+    resume_pdf_url: str = Field(..., description="A direct link to the candidate's resume PDF.")
     id: str = Field(..., description="Unique ID of the candidate.")
     name: str = Field(..., description="Name of the candidate.")
     confidence_score: str = Field(..., description="Confidence score for the candidate's fit (e.g., 'X/5' or 'Y%').")
