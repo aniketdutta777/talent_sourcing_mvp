@@ -57,7 +57,7 @@ async def startup_event():
     print("\n--- FastAPI Startup: Initializing ---")
     core_logic.initialize_api_clients()
     core_logic.initialize_chroma_client()
-    core_logic.initialize_database(500)
+    core_logic.initialize_database()
     print("--- Startup Complete ---")
 
 # --- API Endpoints ---
