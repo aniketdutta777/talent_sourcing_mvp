@@ -69,29 +69,31 @@ class SearchRequest(BaseModel):
 async def startup_event():
     """
     Event handler that runs automatically when the FastAPI application starts.
-    Initializes API clients (loading API keys) and checks/initializes the database.
+    Initializes API clients and checks/initializes the database correctly.
     """
     print("\n--- FastAPI Startup: Initializing API Clients & Checking Database ---")
     try:
-        # CRUCIAL CALL: This function (from core_logic.py) will now load API keys and initialize clients
-        core_logic.initialize_api_clients() # <--- CALL WITH core_logic. PREFIX
+        core_logic.initialize_api_clients()
         print("DEBUG: API clients initialized.")
     except Exception as e:
         print(f"CRITICAL ERROR: Failed to initialize API clients: {e}")
-        raise HTTPException(status_code=500, detail=f"API Client Initialization Failed: {e}") 
+        # In a real app, you might want the server to fail to start if this happens.
+        return
 
-    # Rest of the database initialization check 
     try:
-        # Use core_logic.chroma_client and core_logic.COLLECTION_NAME
-        collection = core_logic.chroma_client.get_collection(name=core_logic.COLLECTION_NAME) 
+        # --- CORRECTED LOGIC ---
+        # Use get_or_create_collection to ensure it always exists before we check its count.
+        collection = core_logic.chroma_client.get_or_create_collection(name=core_logic.COLLECTION_NAME)
+        # -----------------------
+
         if collection.count() == 0:
-            print("Database empty. Initializing with 100 mock resumes...")
-            core_logic.initialize_database(100) # <--- CALL WITH core_logic. PREFIX
+            print("Database collection is empty. Initializing with mock resumes...")
+            core_logic.initialize_database(100)
             print("Database initialization complete.")
         else:
             print(f"Database already initialized with {collection.count()} resumes.")
     except Exception as e:
-        print(f"Error during database startup check/initialization: {e}")
+        print(f"CRITICAL Error during database startup check/initialization: {e}")
 
 @app.post("/v1/search_candidates",
           summary="Search for candidates using LLM intelligence",
