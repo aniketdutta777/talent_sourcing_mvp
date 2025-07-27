@@ -145,7 +145,10 @@ def search_lark_database(user_query: str, num_profiles_to_retrieve: int) -> dict
     return {"status": "error", "message": "Claude did not use the tool as expected."}
 
 def _get_google_drive_service(token_data: dict):
-    creds = Credentials.from_authorized_user_info(token_data, scopes=["https://www.googleapis.com/auth/drive.readonly"])
+    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+    GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+    info = {**token_data, "client_id": GOOGLE_CLIENT_ID, "client_secret": GOOGLE_CLIENT_SECRET, "token_uri": "https://oauth2.googleapis.com/token"}
+    creds = Credentials.from_authorized_user_info(info)
     return build('drive', 'v3', credentials=creds)
 
 def _extract_folder_id_from_url(url: str) -> str:
