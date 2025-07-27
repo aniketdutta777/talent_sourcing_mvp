@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request # <-- ADD Request IMPORT
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -11,7 +11,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Talent Search API",
+    title="Lark Talent API",
     description="An API exposing LLM-powered talent search over a proprietary resume database.",
     version="1.0.0"
 )
@@ -49,14 +49,13 @@ class AnalysisResponse(BaseModel):
     overall_recommendation: str = Field(..., description="Overall recommendation for top candidates.")
 
 class SearchResponseWrapper(BaseModel):
-    status: str = Field(..., description="Status of the API request (e.g., 'success', 'error').")
-    analysis_data: AnalysisResponse = Field(..., description="Structured analysis result from the LLM.")
+    status: str
+    analysis_data: AnalysisResponse
 
-# --- UPDATED SearchRequest Model ---
 class SearchRequest(BaseModel):
     query: str
-    source: str = Field(..., description="The data source to search: 'My Database', 'Google Drive', or 'Both'.")
-    num_results: int = Field(7, description="Number of top candidates to retrieve and analyze.")
+    source: str = Field(..., description="The data source to search.")
+    num_results: int = Field(7, description="Number of top candidates to retrieve.")
 
 # --- Startup Event ---
 @app.on_event("startup")
@@ -69,18 +68,21 @@ async def startup_event():
 # --- API Endpoints ---
 @app.get("/", summary="API Root / Health Check")
 async def read_root():
-    return {"message": "Talent Search API is running."}
+    return {"message": "Lark Talent API is running."}
 
 @app.post("/v1/search_candidates", summary="Search for candidates", response_model=SearchResponseWrapper)
 @limiter.limit("20/minute")
-async def search_candidates(request: SearchRequest, api_key: str = Depends(get_api_key)):
+# --- UPDATED FUNCTION SIGNATURE ---
+async def search_candidates(request: Request, search_request: SearchRequest, api_key: str = Depends(get_api_key)):
     print(f"\n--- API Call: /v1/search_candidates (Key ending with '...{api_key[-4:]}') ---")
-    print(f"Received query: '{request.query}' for source: '{request.source}'")
+    # --- UPDATED VARIABLE NAME ---
+    print(f"Received query: '{search_request.query}' for source: '{search_request.source}'")
 
     try:
+        # --- UPDATED VARIABLE NAMES ---
         result_data = core_logic.perform_claude_search_with_tool(
-            user_query=request.query,
-            num_profiles_to_retrieve=request.num_results
+            user_query=search_request.query,
+            num_profiles_to_retrieve=search_request.num_results
         )
 
         if result_data.get("status") == "success":

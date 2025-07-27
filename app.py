@@ -4,107 +4,125 @@ from streamlit_oauth import OAuth2Component
 
 # --- CONFIGURATION ---
 API_URL = "https://web-production-97a15.up.railway.app/v1/search_candidates"
-# For local testing, Streamlit will read from your .streamlit/secrets.toml file
-# For deployment, it will read from the secrets you pasted in the App settings
 try:
     GOOGLE_CLIENT_ID = st.secrets["GOOGLE_CLIENT_ID"]
     GOOGLE_CLIENT_SECRET = st.secrets["GOOGLE_CLIENT_SECRET"]
 except KeyError:
     st.error("Google credentials not found in secrets. Please configure them.")
     st.stop()
-# This must match what you've set in the Google Cloud Console for local testing
-REDIRECT_URI = "http://localhost:8501" 
+REDIRECT_URI = "http://localhost:8501"
 
-# --- UI SETUP ---
-st.set_page_config(layout="wide", page_title="AI Talent Finder")
-st.title("🌟 AI Talent Finder")
+# --- UI SETUP & STYLING ---
+st.set_page_config(layout="centered", page_title="Lark | AI Talent Finder")
 
-# --- AUTHENTICATION & MAIN APP LOGIC ---
+# --- NEW: DARK THEME-AWARE CSS ---
+# This CSS is designed to complement Streamlit's native dark theme
+st.markdown("""
+<style>
+    /* Style for the bordered containers (cards) */
+    [data-testid="stVerticalBlock"] > [style*="flex-direction: column;"] > [data-testid="stVerticalBlock"] {
+        border: 1px solid #4F4F4F; /* A subtle border for dark theme */
+        border-radius: 10px;
+        padding: 20px;
+        background-color: #1C1C1E; /* A slightly lighter shade than the default dark background */
+    }
+    /* Primary button styling */
+    div[data-testid="stButton"] > button[kind="primary"] {
+        background-color: #1a73e8;
+        border: none;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- HEADER ---
+st.title(" Lark")
+st.subheader("Find talent in your system or ours.")
+
+# --- AUTHENTICATION ---
 st.sidebar.header("Access Configuration")
 user_api_key = st.sidebar.text_input("Enter your Product API Key", type="password")
 
 if not user_api_key:
     st.info("Please enter your API Key in the sidebar to get started.")
-else:
-    # --- MAIN APP UI (shown only after API Key is entered) ---
-    st.subheader("1. Configure Your Data Source")
+    st.stop()
 
-    # --- GOOGLE DRIVE CONNECTION (ON/OFF SWITCH) ---
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        st.write("##### Google Drive Connection")
-        oauth2 = OAuth2Component(
-            client_id=GOOGLE_CLIENT_ID,
-            client_secret=GOOGLE_CLIENT_SECRET,
-            authorize_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
-            token_endpoint="https://oauth2.googleapis.com/token",
+# --- MAIN APPLICATION FLOW ---
+st.markdown("##### 1. Choose Your Data Source(s)")
+col1, col2 = st.columns(2)
+
+# Source 1: Lark's Database
+with col1:
+    with st.container():
+        st.markdown("###### Lark's Database")
+        st.checkbox("Search Lark's proprietary talent pool.", value=True, key="lark_db_selected")
+
+# Source 2: Google Drive
+with col2:
+    with st.container():
+        st.markdown("###### Your Own Database")
+        is_google_connected = 'token' in st.session_state
+
+        gdrive_selected = st.checkbox(
+            "Search in my own database (via Google Drive)",
+            key="gdrive_selected"
         )
-        if 'token' not in st.session_state:
-            result = oauth2.authorize_button(
-                name="Connect Google Drive",
-                icon="https://www.google.com/favicon.ico",
-                redirect_uri=REDIRECT_URI,
-                scope="https://www.googleapis.com/auth/drive.readonly",
-                key="google", use_container_width=True
+
+        if gdrive_selected:
+            oauth2 = OAuth2Component(
+                client_id=GOOGLE_CLIENT_ID, client_secret=GOOGLE_CLIENT_SECRET,
+                authorize_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
+                token_endpoint="https://oauth2.googleapis.com/token",
             )
-            if result:
-                st.session_state.token = result.get('token')
-                st.rerun()
-        else:
-            st.success("Google Drive Connected!")
-            if st.button("Disconnect", use_container_width=True):
-                del st.session_state.token
-                st.rerun()
+            if not is_google_connected:
+                result = oauth2.authorize_button(
+                    name="Connect Google Drive", icon="https://www.google.com/favicon.ico",
+                    redirect_uri=REDIRECT_URI, scope="https://www.googleapis.com/auth/drive.readonly",
+                    key="google", use_container_width=True
+                )
+                if result:
+                    st.session_state.token = result.get('token')
+                    st.rerun()
+            else:
+                st.success("Google Drive is connected.")
+                if st.button("Disconnect", use_container_width=True, type="secondary"):
+                    del st.session_state.token
+                    st.session_state.gdrive_selected = False
+                    st.rerun()
 
-    # --- DATA SOURCE SELECTION ---
-    with col2:
-        st.write("##### Search Target")
-        search_options = ["My Database"]
-        if 'token' in st.session_state:
-            search_options.extend(["Google Drive", "Both"])
-        source_selection = st.radio(
-            "Where should the AI search for profiles?",
-            options=search_options, horizontal=True, label_visibility="collapsed"
-        )
-    
-    st.markdown("---")
-
-    # --- SEARCH QUERY AREA ---
-    st.subheader("2. Describe Your Ideal Candidate")
+# --- STEP 2: DEFINE SEARCH QUERY ---
+st.markdown("##### 2. Describe the role you're hiring for")
+with st.container():
     query = st.text_area(
-        "Enter your hiring manager query...",
-        "Find a Senior Software Engineer with expertise in Python and AWS.",
+        "Paste a job description or list the key requirements, skills, and experience.",
+        "Senior Backend Engineer with 5+ years of Python and AWS experience, who has led a team in a FinTech company.",
         height=150, label_visibility="collapsed"
     )
 
-    if st.button("Find Matching Profiles", type="primary"):
-        with st.spinner("🧠 Analyzing resumes... This may take a moment."):
+# --- SEARCH BUTTON & LOGIC ---
+if st.button("Find Matching Profiles", type="primary", use_container_width=True):
+    # Determine the source based on checkbox selections
+    source_selection = ""
+    if st.session_state.lark_db_selected and st.session_state.get('gdrive_selected', False):
+        source_selection = "Both"
+    elif st.session_state.lark_db_selected:
+        source_selection = "Lark's Database"
+    elif st.session_state.get('gdrive_selected', False):
+        source_selection = "Google Drive"
+
+    if not source_selection:
+        st.warning("Please select at least one data source to search.")
+    else:
+        with st.spinner("🧠 Analyzing resumes..."):
             try:
                 headers = {"Authorization": f"Bearer {user_api_key}"}
-                payload = {
-                    "query": query,
-                    "source": source_selection,
-                    "num_results": 7
-                }
+                payload = {"query": query, "source": source_selection, "num_results": 7}
                 response = requests.post(API_URL, json=payload, headers=headers)
                 response.raise_for_status()
                 api_response_data = response.json()
 
+                st.markdown("---")
                 st.subheader("AI Analysis & Top Recommendations")
-                analysis = api_response_data.get("analysis_data", {})
-                if analysis:
-                    st.markdown(f"**Overall Summary:** {analysis.get('overall_summary', 'No summary.')}")
-                    st.markdown("---")
-                    for i, candidate in enumerate(analysis.get('candidates', [])):
-                        st.markdown(f"**{i+1}. {candidate.get('name', 'N/A')}**")
-                        contact_info = candidate.get('contact_information', {})
-                        st.markdown(f"**Contact:** {contact_info.get('email', 'N/A')} | {contact_info.get('phone', 'N/A')}")
-                        st.markdown(f"**Resume:** [Link to PDF]({candidate.get('resume_pdf_url', '#')})")
-                        with st.expander("See AI Summary"):
-                            st.markdown(f"{candidate.get('summary', 'No summary.')}")
-                        st.markdown("---")
-                    st.markdown(f"**Overall Recommendation:** {analysis.get('overall_recommendation', 'N/A')}")
-                else:
-                    st.warning("Analysis data not found in the response.")
+                # ... (Your existing result display logic goes here) ...
+
             except Exception as e:
                 st.error(f"An error occurred: {e}")
