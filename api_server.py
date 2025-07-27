@@ -57,6 +57,7 @@ class SearchRequest(BaseModel):
     source: str
     num_results: int = 7
     google_drive_folder_ids: list[str] = Field([], description="A list of Google Drive folder URLs or IDs to search within.")
+    google_auth_token: dict = Field(None, description="The user's Google OAuth token.")
 
 # --- Startup Event ---
 @app.on_event("startup")
