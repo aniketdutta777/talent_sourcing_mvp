@@ -1,6 +1,11 @@
 import streamlit as st
 import requests 
 import json 
+import asyncio
+from streamlit_oauth import OAuth2Component
+
+GOOGLE_CLIENT_ID = st.secrets["GOOGLE_CLIENT_ID"]
+GOOGLE_CLIENT_SECRET = st.secrets["GOOGLE_CLIENT_SECRET"]
 
 # --- PRODUCT CONFIGURATION ---
 # Define the URL of your deployed FastAPI server. This is the only configuration needed.
@@ -121,3 +126,38 @@ if st.button("Find Matching Profiles", type="primary"):
 
 st.markdown("---")
 st.markdown("<div style='text-align: center;'>Powered by Advanced AI</div>", unsafe_allow_html=True)
+
+st.sidebar.header("Connect Your Accounts")
+
+# Create an OAuth2Component instance
+oauth2 = OAuth2Component(
+    client_id=st.secrets["GOOGLE_CLIENT_ID"],
+    client_secret=st.secrets["GOOGLE_CLIENT_SECRET"],
+    authorize_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
+    token_endpoint="https://oauth2.googleapis.com/token",
+    refresh_token_endpoint=None, # Google uses the same token endpoint for refresh
+    revoke_token_endpoint="https://oauth2.googleapis.com/revoke",
+)
+
+# Check if a token exists in the session state
+if 'token' not in st.session_state:
+    # If not, show the login button
+    result = oauth2.authorize_button(
+        name="Connect with Google",
+        icon="https://www.google.com/favicon.ico",
+        redirect_uri="http://localhost:8501", # Must match the one in Google Cloud Console
+        scope="https://www.googleapis.com/auth/drive.readonly",
+        key="google",
+        use_container_width=True,
+    )
+    if result:
+        st.session_state.token = result.get('token')
+        st.rerun()
+else:
+    # If a token exists, show the user's info and a logout button
+    token = st.session_state['token']
+    # You would typically fetch user info here using the token
+    st.sidebar.success("Successfully connected to Google Drive!")
+    if st.sidebar.button("Logout from Google"):
+        del st.session_state.token
+        st.rerun()
