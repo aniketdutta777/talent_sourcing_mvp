@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import PlainTextResponse
 import core_logic
 
 # --- Rate Limiting Setup ---
@@ -15,6 +17,14 @@ app = FastAPI(
     description="An API exposing LLM-powered talent search over a proprietary resume database.",
     version="1.0.0"
 )
+
+# Custom exception handler for 422 errors to get detailed logs
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Log the full error to the console in a clear format
+    print(f"!!! DETAILED VALIDATION ERROR !!!\n{exc}\n!!! END OF ERROR !!!")
+    return PlainTextResponse(str(exc), status_code=422)
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 

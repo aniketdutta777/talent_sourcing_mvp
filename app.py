@@ -14,23 +14,14 @@ REDIRECT_URI = "http://localhost:8501"
 
 # --- UI SETUP & STYLING ---
 st.set_page_config(layout="centered", page_title="Lark | AI Talent Finder")
-
-# --- NEW: DARK THEME-AWARE CSS ---
-# This CSS is designed to complement Streamlit's native dark theme
 st.markdown("""
 <style>
-    /* Style for the bordered containers (cards) */
+    /* Dark theme styling */
     [data-testid="stVerticalBlock"] > [style*="flex-direction: column;"] > [data-testid="stVerticalBlock"] {
-        border: 1px solid #4F4F4F; /* A subtle border for dark theme */
-        border-radius: 10px;
-        padding: 20px;
-        background-color: #1C1C1E; /* A slightly lighter shade than the default dark background */
+        border: 1px solid #4F4F4F; border-radius: 10px; padding: 20px;
+        background-color: #1C1C1E;
     }
-    /* Primary button styling */
-    div[data-testid="stButton"] > button[kind="primary"] {
-        background-color: #1a73e8;
-        border: none;
-    }
+    div[data-testid="stButton"] > button[kind="primary"] { background-color: #1a73e8; border: none; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -47,38 +38,39 @@ if not user_api_key:
     st.stop()
 
 # --- MAIN APPLICATION FLOW ---
+
+# Initialize the variable here to guarantee it exists in all code paths
+google_drive_folders = ""
+
 st.markdown("##### 1. Choose Your Data Source(s)")
 col1, col2 = st.columns(2)
 
-# Source 1: Lark's Database
-with col1:
+with col1: # Lark's Database
     with st.container():
         st.markdown("###### Lark's Database")
         st.checkbox("Search Lark's proprietary talent pool.", value=True, key="lark_db_selected")
 
-# Source 2: Google Drive
-with col2:
+with col2: # Google Drive
     with st.container():
         st.markdown("###### Your Own Database")
         is_google_connected = 'token' in st.session_state
-
-        gdrive_selected = st.checkbox(
-            "Search in my own database (via Google Drive)",
-            key="gdrive_selected"
-        )
+        gdrive_selected = st.checkbox("Search in my own database (via Google Drive)", key="gdrive_selected")
 
         if gdrive_selected:
+            google_drive_folders = st.text_area(
+                "**Folders to Search**",
+                placeholder="Paste Google Drive folder URLs here, one per line...",
+                height=100
+            )
             oauth2 = OAuth2Component(
                 client_id=GOOGLE_CLIENT_ID, client_secret=GOOGLE_CLIENT_SECRET,
                 authorize_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
                 token_endpoint="https://oauth2.googleapis.com/token",
             )
             if not is_google_connected:
-                result = oauth2.authorize_button(
-                    name="Connect Google Drive", icon="https://www.google.com/favicon.ico",
-                    redirect_uri=REDIRECT_URI, scope="https://www.googleapis.com/auth/drive.readonly",
-                    key="google", use_container_width=True
-                )
+                result = oauth2.authorize_button(name="Connect Google Drive", icon="https://www.google.com/favicon.ico",
+                                                 redirect_uri=REDIRECT_URI, scope="https://www.googleapis.com/auth/drive.readonly",
+                                                 key="google", use_container_width=True)
                 if result:
                     st.session_state.token = result.get('token')
                     st.rerun()
@@ -89,20 +81,11 @@ with col2:
                     st.session_state.gdrive_selected = False
                     st.rerun()
 
-# --- STEP 2: DEFINE SEARCH QUERY ---
 st.markdown("##### 2. Describe the role you're hiring for")
 with st.container():
-    query = st.text_area(
-        "Paste a job description or list the key requirements, skills, and experience.",
-        "Senior Backend Engineer with 5+ years of Python and AWS experience, who has led a team in a FinTech company.",
-        height=150, label_visibility="collapsed"
-    )
-
-# --- SEARCH BUTTON & LOGIC ---
-# In app.py
+    query = st.text_area("Paste a job description or list key requirements.", "Senior Backend Engineer with Python and AWS experience.", height=150, label_visibility="collapsed")
 
 if st.button("Find Matching Profiles", type="primary", use_container_width=True):
-    # Determine the source based on checkbox selections
     source_selection = ""
     if st.session_state.lark_db_selected and st.session_state.get('gdrive_selected', False):
         source_selection = "Both"
@@ -116,23 +99,17 @@ if st.button("Find Matching Profiles", type="primary", use_container_width=True)
     else:
         with st.spinner("🧠 Analyzing resumes..."):
             try:
-                # --- THIS IS THE CORRECTED PART ---
-                # Get the token from the session state
                 token = st.session_state.get('token')
-                
-                # Parse folder URLs from the text area
                 folder_ids = [url.strip() for url in google_drive_folders.split('\n') if url.strip()]
                 
-                # Build the complete payload, including the token
                 payload = {
                     "query": query,
                     "source": source_selection,
                     "num_results": 7,
                     "google_drive_folder_ids": folder_ids,
-                    "google_auth_token": token # Send the token to the backend
+                    "google_auth_token": token
                 }
-                # --- END CORRECTION ---
-
+                
                 headers = {"Authorization": f"Bearer {user_api_key}"}
                 response = requests.post(API_URL, json=payload, headers=headers)
                 response.raise_for_status()
