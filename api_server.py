@@ -12,13 +12,12 @@ import core_logic
 # --- Rate Limiting Setup ---
 limiter = Limiter(key_func=get_remote_address)
 
-# --- FIX: This line was missing ---
+# Initialize FastAPI app
 app = FastAPI(
     title="Lark Talent API",
     description="An API exposing LLM-powered talent search over a proprietary resume database.",
     version="1.0.0"
 )
-# --------------------------------
 
 # Custom exception handler for 422 errors to get detailed logs
 @app.exception_handler(RequestValidationError)
@@ -43,7 +42,7 @@ def get_api_key(credentials: HTTPAuthorizationCredentials = Depends(security_sch
         return credentials.credentials
     raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing API Key.")
 
-# --- Pydantic Models ---
+# --- Pydantic Models (Unchanged) ---
 class ContactInfo(BaseModel):
     email: str
     phone: str
@@ -70,11 +69,15 @@ class SearchRequest(BaseModel):
     google_drive_folder_ids: list[str] = Field([])
     google_auth_token: Optional[dict] = Field(None)
 
-# --- Startup Event ---
+# --- CORRECTED Startup Event ---
 @app.on_event("startup")
 async def startup_event():
+    """
+    Initializes all clients and databases in a controlled sequence during startup.
+    """
     print("\n--- FastAPI Startup: Initializing ---")
     core_logic.initialize_api_clients()
+    core_logic.initialize_chroma_client() # <-- MOVED DB INITIALIZATION HERE
     core_logic.initialize_database(100)
     print("--- Startup Complete ---")
 
@@ -86,11 +89,6 @@ async def read_root():
 @app.post("/v1/search_candidates", summary="Search for candidates", response_model=SearchResponseWrapper)
 @limiter.limit("20/minute")
 async def search_candidates(request: Request, search_request: SearchRequest, api_key: str = Depends(get_api_key)):
-    print(f"\n--- API Call: /v1/search_candidates (Key ending with '...{api_key[-4:]}') ---")
-    print(f"Received query: '{search_request.query}' for source: '{search_request.source}'")
-    if search_request.google_drive_folder_ids:
-        print(f"Targeting Google Drive folders: {search_request.google_drive_folder_ids}")
-
     try:
         result_data = core_logic.perform_claude_search_with_tool(
             user_query=search_request.query,
@@ -100,14 +98,10 @@ async def search_candidates(request: Request, search_request: SearchRequest, api
             user_id=api_key,
             token=search_request.google_auth_token
         )
-
         if result_data.get("status") == "success":
             usage = result_data.get("usage", {})
             print(f"COST_LOG: key='{api_key}' usage={usage}")
-            return SearchResponseWrapper(
-                status="success",
-                analysis_data=result_data["analysis_data"]
-            )
+            return SearchResponseWrapper(status="success", analysis_data=result_data["analysis_data"])
         else:
             raise HTTPException(status_code=500, detail=result_data.get("message", "Unknown LLM error"))
     except Exception as e:
