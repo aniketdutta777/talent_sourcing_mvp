@@ -100,7 +100,7 @@ def resume_search_tool(query: str, num_results: int = 5, level: str = None, indu
             candidates_data.append({"name": metadata.get("name"), "contact_information": {"email": metadata.get("email"), "phone": metadata.get("phone")}, "resume_pdf_url": metadata.get("pdf_url"), "raw_resume_text": results['documents'][0][i]})
     else:
         print("Tool: No candidates found for the query with the specified filters.")
-        return [{"message": "No candidates found matching the search criteria and filters."}]
+        # Return an empty list directly
     return candidates_data
 
 resume_search_tool_schema = {
@@ -110,7 +110,7 @@ resume_search_tool_schema = {
 
 def search_lark_database(user_query: str, num_profiles_to_retrieve: int) -> dict:
     print("--- Firing search against Lark's Database ---")
-    system_message = """You are an expert HR recruitment assistant. Use the `resume_search_tool` to find candidates. After using the tool, analyze the results and provide a summary. If the tool returns no candidates, inform the user clearly. YOUR FINAL OUTPUT MUST BE VALID JSON. Structure your response as follows:
+    system_message = """You are an expert HR recruitment assistant. Use the `resume_search_tool` to find candidates. After using the tool, analyze the results and provide a summary. If the tool returns no candidates, inform the user clearly that no one was found. YOUR FINAL OUTPUT MUST BE VALID JSON. Structure your response as follows:
 ```json
 {
   "overall_summary": "Overall summary of the search results and candidate quality.",
@@ -135,9 +135,9 @@ def search_lark_database(user_query: str, num_profiles_to_retrieve: int) -> dict
             tool_use = next((block for block in response.content if block.type == "tool_use"), None)
             if not tool_use: return {"status": "error", "message": "Claude indicated tool use, but no tool was specified."}
             tool_output = resume_search_tool(**tool_use.input)
-            if (isinstance(tool_output, list) and len(tool_output) > 0 and tool_output[0].get("message", "").startswith("No candidates found")):
-                print("Tool returned no candidates. Bypassing final LLM analysis.")
-                return {"status": "success", "analysis_data": {"overall_summary": "The initial search did not find any relevant candidates in the database for this query.", "candidates": [], "overall_recommendation": "Try broadening your search terms."}, "usage": {"input_tokens": 0, "output_tokens": 0}}
+            
+            # REMOVED THE BYPASS LOGIC BLOCK
+            
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_use.id, "content": json.dumps(tool_output)}]})
             final_response = global_client_anthropic.messages.create(model="claude-3-haiku-20240307", max_tokens=2000, temperature=0.5, messages=messages, system=system_message)
@@ -147,7 +147,13 @@ def search_lark_database(user_query: str, num_profiles_to_retrieve: int) -> dict
             return {"status": "success", "analysis_data": parsed_json, "usage": usage_data}
         elif response.stop_reason == "end_turn":
             print("Claude provided a direct response without tool use.")
-            return {"status": "success", "analysis_data": {"overall_summary": f"The AI provided a direct response: {response.content[0].text}", "candidates": [], "overall_recommendation": "No candidates were searched as the AI answered directly."}, "usage": {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}}
+            # Ensure the direct response also fits the data model for consistency
+            direct_analysis = {
+                "overall_summary": f"The AI provided a direct response without searching the database: {response.content[0].text}",
+                "candidates": [],
+                "overall_recommendation": "No candidates were searched for as the AI answered the query directly. Please try rephrasing your request to focus on candidate profiles."
+            }
+            return {"status": "success", "analysis_data": direct_analysis, "usage": {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}}
     except Exception as e:
         if "Expecting value" in str(e): return {"status": "error", "message": "LLM returned an empty or invalid response after tool use."}
         return {"status": "error", "message": f"LLM analysis failed: {e}"}
