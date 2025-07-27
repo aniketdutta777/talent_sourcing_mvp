@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Request # <-- ADD Request IMPORT
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -54,8 +54,9 @@ class SearchResponseWrapper(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str
-    source: str = Field(..., description="The data source to search.")
-    num_results: int = Field(7, description="Number of top candidates to retrieve.")
+    source: str
+    num_results: int = 7
+    google_drive_folder_ids: list[str] = Field([], description="A list of Google Drive folder URLs or IDs to search within.")
 
 # --- Startup Event ---
 @app.on_event("startup")
@@ -72,17 +73,20 @@ async def read_root():
 
 @app.post("/v1/search_candidates", summary="Search for candidates", response_model=SearchResponseWrapper)
 @limiter.limit("20/minute")
-# --- UPDATED FUNCTION SIGNATURE ---
 async def search_candidates(request: Request, search_request: SearchRequest, api_key: str = Depends(get_api_key)):
     print(f"\n--- API Call: /v1/search_candidates (Key ending with '...{api_key[-4:]}') ---")
-    # --- UPDATED VARIABLE NAME ---
     print(f"Received query: '{search_request.query}' for source: '{search_request.source}'")
+    if search_request.google_drive_folder_ids:
+        print(f"Targeting Google Drive folders: {search_request.google_drive_folder_ids}")
 
     try:
-        # --- UPDATED VARIABLE NAMES ---
+        # --- FIX: Pass all relevant parameters to the core logic function ---
         result_data = core_logic.perform_claude_search_with_tool(
             user_query=search_request.query,
-            num_profiles_to_retrieve=search_request.num_results
+            num_profiles_to_retrieve=search_request.num_results,
+            source=search_request.source,
+            folder_ids=search_request.google_drive_folder_ids,
+            user_id=api_key # Using the API key as a simple user identifier for now
         )
 
         if result_data.get("status") == "success":
@@ -95,5 +99,6 @@ async def search_candidates(request: Request, search_request: SearchRequest, api
         else:
             raise HTTPException(status_code=500, detail=result_data.get("message", "Unknown LLM error"))
     except Exception as e:
+        # --- IMPROVEMENT: Log detailed error but return a generic message ---
         print(f"Error during API call: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
