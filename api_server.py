@@ -9,7 +9,6 @@ from fastapi.responses import PlainTextResponse
 from typing import Optional
 import core_logic
 
-# --- Rate Limiting Setup ---
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Lark Talent API", version="1.0.0")
 
@@ -28,7 +27,6 @@ def get_api_key(credentials: HTTPAuthorizationCredentials = Depends(security_sch
     if credentials.credentials in VALID_API_KEYS: return credentials.credentials
     raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing API Key.")
 
-# --- Pydantic Models ---
 class ContactInfo(BaseModel):
     email: str
     phone: str
@@ -51,7 +49,6 @@ class SearchRequest(BaseModel):
     google_drive_folder_ids: list[str] = Field([])
     google_auth_token: Optional[dict] = Field(None)
 
-# --- Startup Event ---
 @app.on_event("startup")
 async def startup_event():
     print("\n--- FastAPI Startup: Initializing ---")
@@ -60,7 +57,6 @@ async def startup_event():
     core_logic.initialize_database()
     print("--- Startup Complete ---")
 
-# --- API Endpoints ---
 @app.get("/", summary="API Root / Health Check")
 async def read_root():
     return {"message": "Lark Talent API is running."}

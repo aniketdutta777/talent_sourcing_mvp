@@ -109,14 +109,8 @@ def search_lark_database(user_query: str, num_profiles_to_retrieve: int) -> dict
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_use.id, "content": json.dumps(tool_output)}]})
             final_response = global_client_anthropic.messages.create(model="claude-3-haiku-20240307", max_tokens=2000, temperature=0.5, messages=messages, system=system_message)
-            
-            # --- NEW FIX: Check for empty response from LLM ---
             json_string = final_response.content[0].text.strip().lstrip("```json").rstrip("```").strip()
-            if not json_string:
-                print("LLM returned an empty string after tool use. Bypassing JSON parsing.")
-                return {"status": "error", "message": "The AI failed to produce an analysis for the found candidates."}
-            # --- END FIX ---
-
+            if not json_string: return {"status": "error", "message": "The AI failed to produce an analysis for the found candidates."}
             parsed_json = json.loads(json_string)
             usage_data = {"input_tokens": final_response.usage.input_tokens, "output_tokens": final_response.usage.output_tokens}
             return {"status": "success", "analysis_data": parsed_json, "usage": usage_data}
@@ -127,21 +121,63 @@ def search_lark_database(user_query: str, num_profiles_to_retrieve: int) -> dict
     return {"status": "error", "message": f"Unexpected response from Claude with stop reason: {response.stop_reason}"}
 
 def _get_google_drive_service(token_data: dict):
-    # ... (function is correct and remains unchanged)
-    pass
+    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+    GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+    info = {**token_data, "client_id": GOOGLE_CLIENT_ID, "client_secret": GOOGLE_CLIENT_SECRET, "token_uri": "https://oauth2.googleapis.com/token"}
+    creds = Credentials.from_authorized_user_info(info)
+    return build('drive', 'v3', credentials=creds)
 
 def _extract_folder_id_from_url(url: str) -> str:
-    # ... (function is correct and remains unchanged)
-    pass
+    if "folders/" in url: return url.split("folders/")[1].split("?")[0]
+    return None
 
 def _extract_text_from_pdf(pdf_content: bytes) -> str:
-    # ... (function is correct and remains unchanged)
-    pass
+    try:
+        with fitz.open(stream=pdf_content, filetype="pdf") as doc: text = "".join(page.get_text() for page in doc)
+        return text
+    except Exception as e:
+        print(f"Error extracting text from PDF: {e}")
+        return ""
 
 def search_google_drive(user_query: str, num_profiles_to_retrieve: int, folder_ids: list, user_id: str, token: dict) -> dict:
-    # ... (function is correct and remains unchanged)
-    pass
+    if not token: return {"status": "error", "message": "Google Drive token not provided."}
+    try:
+        service = _get_google_drive_service(token)
+        gdrive_collection = chroma_client.get_or_create_collection(name=GDRIVE_COLLECTION_NAME)
+        for folder_url in folder_ids:
+            folder_id = _extract_folder_id_from_url(folder_url)
+            if not folder_id: continue
+            q = f"'{folder_id}' in parents and mimeType='application/pdf'"
+            results = service.files().list(q=q, fields="files(id, name)").execute()
+            for item in results.get('files', []):
+                if not gdrive_collection.get(ids=[item['id']]).get('ids'):
+                    print(f"Processing new file: {item['name']}")
+                    request = service.files().get_media(fileId=item['id'])
+                    file_bytes = request.execute()
+                    text = _extract_text_from_pdf(file_bytes)
+                    if text:
+                        gdrive_collection.add(ids=[item['id']], embeddings=[get_embedding(text)], documents=[text], metadatas=[{"user_id": user_id, "file_name": item['name']}])
+        search_results = gdrive_collection.query(query_embeddings=[get_embedding(user_query)], n_results=num_profiles_to_retrieve, where={"user_id": user_id}, include=['documents'])
+        context_for_llm = "\n\n---\n\n".join(search_results['documents'][0])
+        final_response = global_client_anthropic.messages.create(
+            model="claude-3-haiku-20240307", max_tokens=2000, temperature=0.5,
+            system="Analyze the following resume texts based on the user's query and provide a summary in the standard JSON format.",
+            messages=[{"role": "user", "content": f"Query: {user_query}\n\nResumes:\n{context_for_llm}"}]
+        )
+        json_string = final_response.content[0].text.strip().lstrip("```json").rstrip("```")
+        parsed_json = json.loads(json_string)
+        usage_data = {"input_tokens": final_response.usage.input_tokens, "output_tokens": final_response.usage.output_tokens}
+        return {"status": "success", "analysis_data": parsed_json, "usage": usage_data}
+    except Exception as e:
+        return {"status": "error", "message": f"An error occurred during Google Drive search: {e}"}
 
 def perform_claude_search_with_tool(user_query: str, num_profiles_to_retrieve: int, source: str, folder_ids: list, user_id: str, token: dict) -> dict:
-    # ... (function is correct and remains unchanged)
-    pass
+    if source == "Lark's Database":
+        return search_lark_database(user_query, num_profiles_to_retrieve)
+    elif source == "Google Drive":
+        return search_google_drive(user_query, num_profiles_to_retrieve, folder_ids, user_id, token)
+    elif source == "Both":
+        print("--- Source 'Both' selected, defaulting to Lark's Database for MVP ---")
+        return search_lark_database(user_query, num_profiles_to_retrieve)
+    else:
+        return {"status": "error", "message": f"Invalid source specified: {source}"}
