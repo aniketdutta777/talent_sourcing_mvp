@@ -108,3 +108,4 @@ zipp==3.23.0
 gunicorn
 slowapi
 PyMuPDF
+google-api-python-client
