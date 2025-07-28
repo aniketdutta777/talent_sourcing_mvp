@@ -12,7 +12,7 @@ from googleapiclient.discovery import build
 
 COLLECTION_NAME = "lark_static_resumes"
 GDRIVE_COLLECTION_NAME = "gdrive_resumes"
-DATABASE_DIR = "./mock_resume_database"
+DATABASE_DIR = "./lark_db"
 
 STATIC_RESUME_DATA = [
     {"id": "dev-001", "name": "Alice Anderson", "email": "alice.a@example.com", "phone": "(123) 555-0101", "pdf_url": "https://example.com/resumes/dev-001.pdf", "job_title": "Senior Software Engineer", "industry": "Tech", "level": "Senior", "skills": ["Python", "AWS", "SQL", "DevOps", "FastAPI"], "raw_text": "Alice Anderson | Senior Software Engineer with 8 years of experience in the Tech industry. Expert in Python, AWS cloud services, and building scalable backend systems with FastAPI. Proven track record in leading DevOps practices and database management with SQL."},
@@ -34,12 +34,8 @@ def initialize_api_clients():
 
 def initialize_chroma_client():
     global chroma_client
-    try:
-        chroma_client = chromadb.Client()
-        print("DEBUG: ChromaDB client initialized.")
-    except Exception as e:
-        print(f"CRITICAL ERROR: Failed to initialize ChromaDB client: {e}. Falling back to local.")
-        chroma_client = chromadb.PersistentClient(path=os.path.join(DATABASE_DIR, "chroma_db"))
+    chroma_client = chromadb.PersistentClient(path=DATABASE_DIR)
+    print(f"DEBUG: Persistent ChromaDB client initialized at path: {DATABASE_DIR}")
 
 def get_embedding(text, model="text-embedding-3-small"):
     if global_client_openai is None: raise RuntimeError("OpenAI client not initialized.")
@@ -49,18 +45,19 @@ def get_embedding(text, model="text-embedding-3-small"):
 def initialize_database():
     if chroma_client is None: raise RuntimeError("Chroma client not initialized.")
     collection = chroma_client.get_or_create_collection(name=COLLECTION_NAME)
-    if collection.count() > 0:
+    if collection.count() == 0:
+        print(f"Database collection '{COLLECTION_NAME}' is empty. Populating with static data...")
+        resumes_data = STATIC_RESUME_DATA
+        for resume in resumes_data:
+            collection.add(
+                embeddings=[get_embedding(resume["raw_text"])],
+                documents=[resume["raw_text"]],
+                metadatas=[{"resume_id": resume["id"], "name": resume["name"], "email": resume["email"], "phone": resume["phone"], "pdf_url": resume["pdf_url"], "job_title": resume["job_title"], "level": resume["level"], "industry": resume["industry"], "skills": ", ".join(resume["skills"])}],
+                ids=[resume["id"]]
+            )
+        print(f"Successfully added {len(resumes_data)} static resumes to ChromaDB.")
+    else:
         print(f"Static database already initialized with {collection.count()} resumes.")
-        return
-    resumes_data = STATIC_RESUME_DATA
-    for resume in resumes_data:
-        collection.add(
-            embeddings=[get_embedding(resume["raw_text"])],
-            documents=[resume["raw_text"]],
-            metadatas=[{"resume_id": resume["id"], "name": resume["name"], "email": resume["email"], "phone": resume["phone"], "pdf_url": resume["pdf_url"], "job_title": resume["job_title"], "level": resume["level"], "industry": resume["industry"], "skills": ", ".join(resume["skills"])}],
-            ids=[resume["id"]]
-        )
-    print(f"Successfully added {len(resumes_data)} static resumes to ChromaDB.")
 
 def resume_search_tool(query: str, num_results: int = 5, level: str = None, industry: str = None) -> list[dict]:
     if chroma_client is None: raise RuntimeError("Chroma client not initialized.")
@@ -94,7 +91,18 @@ def search_lark_database(user_query: str, num_profiles_to_retrieve: int) -> dict
 ```json
 {
   "overall_summary": "Overall summary of the search results and candidate quality.",
-  "candidates": [], "overall_recommendation": "Final thoughts on the candidate pool."
+  "candidates": [
+    {
+      "name": "Candidate Name",
+      "contact_information": {
+        "email": "candidate@example.com",
+        "phone": "(123) 555-1234"
+      },
+      "summary": "A concise summary of why this candidate is a good fit, referencing their skills and experience against the job query.",
+      "resume_pdf_url": "[https://example.com/resumes/candidate_id.pdf](https://example.com/resumes/candidate_id.pdf)"
+    }
+  ],
+  "overall_recommendation": "Final thoughts on the candidate pool."
 }
 ```"""
     messages = [{"role": "user", "content": user_query}]
@@ -158,6 +166,8 @@ def search_google_drive(user_query: str, num_profiles_to_retrieve: int, folder_i
                     if text:
                         gdrive_collection.add(ids=[item['id']], embeddings=[get_embedding(text)], documents=[text], metadatas=[{"user_id": user_id, "file_name": item['name']}])
         search_results = gdrive_collection.query(query_embeddings=[get_embedding(user_query)], n_results=num_profiles_to_retrieve, where={"user_id": user_id}, include=['documents'])
+        if not search_results['documents'] or not search_results['documents'][0]:
+            return {"status": "success", "analysis_data": {"overall_summary": "No relevant resumes were found in your Google Drive for this query.", "candidates": [], "overall_recommendation": "Try a different query or add more resumes to the selected folders."},"usage": {"input_tokens": 0, "output_tokens": 0}}
         context_for_llm = "\n\n---\n\n".join(search_results['documents'][0])
         final_response = global_client_anthropic.messages.create(
             model="claude-3-haiku-20240307", max_tokens=2000, temperature=0.5,
